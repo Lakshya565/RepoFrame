@@ -1,6 +1,6 @@
 # RepoFrame
 
-RepoFrame is a full-stack developer tool that turns GitHub repositories into clear, evidence-backed project writeups.
+Frame your project around what you actually built. RepoFrame is a full-stack developer tool that turns GitHub repositories into clear, evidence-backed project writeups.
 
 The app will analyze a repository's structure and technical signals, ask the user for project context, and generate resume bullets, README sections, portfolio blurbs, and interview talking points grounded in actual repository evidence.
 
