@@ -1,7 +1,6 @@
 export type ParsedGitHubRepo = {
   owner: string;
   repo: string;
-  normalizedUrl: string;
 };
 
 const GITHUB_HOST = "github.com";
@@ -46,7 +45,6 @@ export function parseGitHubRepoUrl(repoUrl: string): ParsedGitHubRepo | null {
   return {
     owner,
     repo,
-    normalizedUrl: `https://${GITHUB_HOST}/${owner}/${repo}`,
   };
 }
 

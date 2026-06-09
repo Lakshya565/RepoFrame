@@ -4,8 +4,6 @@ import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { parseGitHubRepoUrl } from "@/lib/github-url";
 
-const EXAMPLE_REPO_URL = "https://github.com/vercel/next.js.git";
-
 export function RepoUrlForm() {
   const router = useRouter();
   const [repoUrl, setRepoUrl] = useState("");
@@ -14,14 +12,10 @@ export function RepoUrlForm() {
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    navigateToAnalysis(repoUrl);
-  }
 
-  function navigateToAnalysis(url: string) {
-    const parsedRepo = parseGitHubRepoUrl(url);
+    const parsedRepo = parseGitHubRepoUrl(repoUrl);
 
     if (!parsedRepo) {
-      setIsSubmitting(false);
       setError(
         "Enter a GitHub repository URL in the format https://github.com/{owner}/{repo} or https://github.com/{owner}/{repo}.git.",
       );
@@ -37,12 +31,6 @@ export function RepoUrlForm() {
     });
 
     router.push(`/analysis?${params.toString()}`);
-  }
-
-  function useExampleRepo() {
-    setRepoUrl(EXAMPLE_REPO_URL);
-    setError(null);
-    navigateToAnalysis(EXAMPLE_REPO_URL);
   }
 
   return (
@@ -81,7 +69,7 @@ export function RepoUrlForm() {
           {isSubmitting ? "Analyzing..." : "Analyze repo"}
         </button>
       </div>
-      <div className="mt-3 flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+      <div className="mt-3 text-sm">
         {error ? (
           <p className="text-red-700" id="repo-url-error">
             {error}
@@ -92,14 +80,6 @@ export function RepoUrlForm() {
             repository.
           </p>
         )}
-        <button
-          className="w-fit text-sm font-medium text-emerald-700 transition hover:text-emerald-900 disabled:cursor-not-allowed disabled:text-slate-400"
-          disabled={isSubmitting}
-          onClick={useExampleRepo}
-          type="button"
-        >
-          Use example
-        </button>
       </div>
     </form>
   );
