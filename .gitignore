@@ -70,6 +70,26 @@ web_modules/
 .env.*
 !.env.example
 
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+env/
+ENV/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# FastAPI / backend
+*.db
+*.sqlite
+*.sqlite3
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache

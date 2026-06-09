@@ -1,17 +1,75 @@
 # RepoFrame
-Frame your project around what you actually built by turning your project repo into a clear, evidence-backed story. RepoFrame is a full-stack developer tool that analyzes GitHub repositories and turns them into clear, evidence-backed project writeups. A Next.js frontend handles the user flow, while a FastAPI backend fetches repo data, ranks important files, detects the tech stack, and uses an LLM pipeline to generate resume bullets, README sections, portfolio blurbs, and interview talking points grounded in actual project evidence.
 
-Initial Tech Stack:
- Next.js frontend
-    ↓
-FastAPI backend
-    ↓
-GitHub REST API
-    ↓
-Repo parser + file ranker + stack detector
-    ↓
-OpenAI API
-    ↓
-Project profile + generated outputs
-    ↓
-Supabase/Postgres
+RepoFrame is a full-stack developer tool that turns GitHub repositories into clear, evidence-backed project writeups.
+
+The app will analyze a repository's structure and technical signals, ask the user for project context, and generate resume bullets, README sections, portfolio blurbs, and interview talking points grounded in actual repository evidence.
+
+## Tech Stack
+
+- Frontend: Next.js, TypeScript, Tailwind CSS
+- Backend: FastAPI, Python, Pydantic
+- Planned integrations: GitHub REST API, OpenAI API, Supabase/Postgres
+
+## Project Structure
+
+```text
+RepoFrame/
+  frontend/   Next.js app
+  backend/    FastAPI app dependencies and future backend source
+```
+
+Current frontend structure:
+
+```text
+frontend/
+  public/
+  src/app/
+  package.json
+  tsconfig.json
+```
+
+Current backend structure:
+
+```text
+backend/
+  requirements.txt
+```
+
+## Local Development
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The frontend runs on the port printed by Next.js, usually `http://localhost:3000`.
+
+### Backend
+
+```bash
+cd backend
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+Backend source files have not been added yet. Once the FastAPI app exists, run it with a command like:
+
+```bash
+uvicorn app.main:app --reload
+```
+
+## MVP Goals
+
+- Accept a GitHub repository URL from the user.
+- Extract repository structure and identify important files.
+- Detect technical evidence such as languages, frameworks, dependencies, and notable implementation details.
+- Ask the user for missing project context.
+- Generate evidence-backed resume bullets, README sections, portfolio blurbs, and interview talking points.
+
+## Current Scope
+
+This repository is in early scaffolding. GitHub API access, OpenAI generation, database persistence, and authentication are planned but not implemented yet.
