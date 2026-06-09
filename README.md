@@ -24,6 +24,8 @@ Current frontend structure:
 frontend/
   public/
   src/app/
+  src/components/
+  src/lib/
   package.json
   tsconfig.json
 ```
@@ -72,4 +74,6 @@ uvicorn app.main:app --reload
 
 ## Current Scope
 
-This repository is in early scaffolding. GitHub API access, OpenAI generation, database persistence, and authentication are planned but not implemented yet.
+Phase 1 is implemented on the frontend. The app has a landing page with a GitHub repository URL input, client-side URL validation, loading and error states, and a placeholder analysis page that displays the parsed repository owner and name.
+
+GitHub API access, OpenAI generation, database persistence, and authentication are planned but not implemented yet.

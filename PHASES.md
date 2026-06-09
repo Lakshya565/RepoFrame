@@ -6,7 +6,7 @@ This file only lists the main project phases from the current point forward. Pha
 
 ---
 
-# Phase 1: Basic Frontend Flow
+# Phase 1(DONE, DO NOT TOUCH): Basic Frontend Flow
 
 ## Goal
 
@@ -26,7 +26,7 @@ Placeholder analysis result page
 ## Codex Prompt
 
 ```text
-Build the initial frontend flow for RepoFrame. Add a polished landing page with the product name, tagline, GitHub repo URL input, and a simple “How it works” section. Add client-side validation for GitHub repo URLs in the format https://github.com/{owner}/{repo}. On valid submission, navigate to a placeholder analysis page showing the parsed owner and repo. Do not call the backend yet.
+Build the initial frontend flow for RepoFrame. Add a polished landing page with the product name, tagline, GitHub repo URL input, and a simple “How it works” section(which should just be telling the user to clone their repo using the https web url). Add client-side validation for GitHub repo URLs in the format https://github.com/{owner}/{repo}. On valid submission, navigate to a placeholder analysis page showing the parsed owner and repo. Do not call the backend yet. NOTE - these pages will be changed in the future, so just do a very basic structure that can easily be adapted/replaced. I want to expose it on localhost, so once you're finished, provide all the steps to spin up the frontend.
 ```
 
 ---
@@ -50,7 +50,7 @@ Frontend calls backend
 ## Codex Prompt
 
 ```text
-Implement a FastAPI endpoint for parsing GitHub repo URLs. Add POST /api/repo/parse that accepts a repoUrl string and returns owner, repo, and normalizedUrl. Use Pydantic models for request and response validation. Add error handling for invalid GitHub URLs. Connect the frontend repo input form to this backend endpoint and display the parsed result.
+Implement a FastAPI endpoint for parsing GitHub repo URLs. This will REPLACE the current frontend system, we need to have all this done through the backend rather than the frontend. Add POST /api/repo/parse that accepts a repoUrl string and returns owner, repo, and normalizedUrl.  Use Pydantic models for request and response validation. Add error handling for invalid GitHub URLs. Connect the frontend repo input form to this backend endpoint and display the parsed result.
 ```
 
 ---
