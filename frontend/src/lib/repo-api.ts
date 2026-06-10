@@ -4,6 +4,16 @@ export type ParsedRepoResponse = {
   normalizedUrl: string;
 };
 
+export type RepoMetadataResponse = ParsedRepoResponse & {
+  name: string;
+  description: string | null;
+  defaultBranch: string;
+  stars: number;
+  forks: number;
+  language: string | null;
+  htmlUrl: string;
+};
+
 type ApiErrorResponse = {
   detail?: unknown;
 };
@@ -27,16 +37,48 @@ export async function parseRepoUrl(
       () => ({}),
     )) as ApiErrorResponse;
 
-    throw new Error(getApiErrorMessage(errorBody));
+    throw new Error(
+      getApiErrorMessage(errorBody, "RepoFrame could not parse that URL."),
+    );
   }
 
   return (await response.json()) as ParsedRepoResponse;
 }
 
-function getApiErrorMessage(errorBody: ApiErrorResponse): string {
+export async function fetchRepoMetadata(
+  repoUrl: string,
+): Promise<RepoMetadataResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/repo/metadata`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ repoUrl }),
+  });
+
+  if (!response.ok) {
+    const errorBody = (await response.json().catch(
+      () => ({}),
+    )) as ApiErrorResponse;
+
+    throw new Error(
+      getApiErrorMessage(
+        errorBody,
+        "RepoFrame could not fetch repository metadata.",
+      ),
+    );
+  }
+
+  return (await response.json()) as RepoMetadataResponse;
+}
+
+function getApiErrorMessage(
+  errorBody: ApiErrorResponse,
+  fallbackMessage: string,
+): string {
   if (typeof errorBody.detail === "string") {
     return errorBody.detail;
   }
 
-  return "RepoFrame could not parse that URL.";
+  return fallbackMessage;
 }

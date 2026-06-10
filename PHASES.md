@@ -55,7 +55,7 @@ Implement a FastAPI endpoint for parsing GitHub repo URLs. This will REPLACE the
 
 ---
 
-# Phase 3: GitHub Metadata Fetching
+# Phase 3(DONE, DO NOT TOUCH): GitHub Metadata Fetching
 
 ## Goal
 

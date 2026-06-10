@@ -66,6 +66,8 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 The backend runs at `http://127.0.0.1:8000`. Check `GET /health` to confirm it is running.
 
+Local backend secrets live in `backend/.env`, which is ignored by Git. `GITHUB_TOKEN` is optional for public repository metadata fetching. Without it, RepoFrame uses GitHub's unauthenticated public API rate limit.
+
 The frontend uses `NEXT_PUBLIC_API_BASE_URL` when set, otherwise it calls `http://127.0.0.1:8000`.
 
 Run backend tests with:
@@ -85,6 +87,6 @@ cd backend
 
 ## Current Scope
 
-Phase 2 is implemented. The app has a landing page with a GitHub repository URL input, a FastAPI backend health endpoint, backend repository URL parsing, loading and error states, and a placeholder analysis page that displays the parsed repository owner and name.
+Phase 3 is implemented. The app has a landing page with a GitHub repository URL input, a FastAPI backend health endpoint, backend repository URL parsing, public GitHub repository metadata fetching, loading and error states, and an analysis page that displays a repository summary card.
 
-GitHub API access, OpenAI generation, database persistence, and authentication are planned but not implemented yet.
+OpenAI generation, database persistence, and authentication are planned but not implemented yet.

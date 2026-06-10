@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { RepoSummaryCard } from "@/components/repo-summary-card";
 
 type AnalysisPageProps = {
   searchParams: Promise<{
@@ -51,33 +52,8 @@ export default async function AnalysisPage({ searchParams }: AnalysisPageProps) 
           Back to RepoFrame
         </Link>
 
-        <div className="mt-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">
-            Placeholder analysis
-          </p>
-          <h1 className="mt-4 text-3xl font-semibold">{owner}/{repo}</h1>
-          <dl className="mt-6 grid gap-4 sm:grid-cols-2">
-            <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
-              <dt className="text-sm font-medium text-slate-500">Owner</dt>
-              <dd className="mt-2 break-words font-mono text-slate-950">
-                {owner}
-              </dd>
-            </div>
-            <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
-              <dt className="text-sm font-medium text-slate-500">Repo</dt>
-              <dd className="mt-2 break-words font-mono text-slate-950">
-                {repo}
-              </dd>
-            </div>
-          </dl>
-          <a
-            className="mt-6 inline-flex min-h-11 items-center rounded-md border border-slate-300 px-4 text-sm font-semibold text-slate-800 transition hover:border-slate-400 hover:bg-slate-50"
-            href={normalizedUrl}
-            rel="noreferrer"
-            target="_blank"
-          >
-            Open repository
-          </a>
+        <div className="mt-6">
+          <RepoSummaryCard repoUrl={normalizedUrl} />
         </div>
       </section>
     </main>
