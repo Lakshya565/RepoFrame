@@ -73,7 +73,7 @@ Frontend repo summary card
 ## Codex Prompt
 
 ```text
-Implement GitHub public repo metadata fetching in the FastAPI backend. Add a GitHub service that fetches repo name, description, default branch, stars, forks, language, and HTML URL using the GitHub REST API. Add a POST /api/repo/metadata endpoint that accepts a repo URL, parses it, fetches metadata, and returns a typed response. Connect the frontend to display this metadata in a RepoSummaryCard. Include loading and error states.
+Implement GitHub public repo metadata fetching in the FastAPI backend. Add a GitHub service that fetches repo name, description, default branch, stars, forks, language, and HTML URL using the GitHub REST API. Add a POST /api/repo/metadata endpoint that accepts a repo URL, parses it, fetches metadata, and returns a typed response. Connect the frontend to display this metadata in a RepoSummaryCard. Include loading and error states, as well as all edge cases - account for this and make the RepoSummaryCard dynamically sized based on the number of outputs from the GitHub API. 
 ```
 
 ---
