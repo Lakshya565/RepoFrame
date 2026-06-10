@@ -31,7 +31,7 @@ Build the initial frontend flow for RepoFrame. Add a polished landing page with 
 
 ---
 
-# Phase 2: Backend Health and Repo URL Parsing
+# Phase 2(DONE< DO NOT TOUCH): Backend Health and Repo URL Parsing
 
 ## Goal
 
@@ -50,7 +50,7 @@ Frontend calls backend
 ## Codex Prompt
 
 ```text
-Implement a FastAPI endpoint for parsing GitHub repo URLs. This will REPLACE the current frontend system, we need to have all this done through the backend rather than the frontend. Add POST /api/repo/parse that accepts a repoUrl string and returns owner, repo, and normalizedUrl.  Use Pydantic models for request and response validation. Add error handling for invalid GitHub URLs. Connect the frontend repo input form to this backend endpoint and display the parsed result.
+Implement a FastAPI endpoint for parsing GitHub repo URLs. This will REPLACE the current frontend system, we need to have all this done through the backend rather than the frontend, so please get rid of redundant frontend code that will now be replaced. Do not hallucinate values, and ask me for all example code you would like to include. Add POST /api/repo/parse that accepts a repoUrl string and returns owner, repo, and normalizedUrl.  Use Pydantic models for request and response validation. Add error handling for invalid GitHub URLs. Connect the frontend repo input form to this backend endpoint and display the parsed result.
 ```
 
 ---
@@ -96,7 +96,7 @@ Display top-level structure in UI
 ## Codex Prompt
 
 ```text
-Add GitHub file tree fetching. Use the repo default branch to fetch the recursive file tree from the GitHub API. Return normalized RepoFile objects with path, type, size if available, and URL if available. Add a backend endpoint POST /api/repo/tree. Display the fetched file tree summary in the frontend, including total files and a preview of important-looking paths.
+Add GitHub file tree fetching. Use the repo default branch to fetch the recursive file tree from the GitHub API. Return normalized RepoFile objects with path, type, size if available, and URL if available. Add a backend endpoint POST /api/repo/tree. Display the fetched file tree summary in the frontend, including total files and a preview of important-looking paths. Make sure to create a dedicated view for the tree, because later I want to replace it with a more interactive tree view. However, don't focus too much on that, just create the file tree as a text based visual for right now.
 ```
 
 ---

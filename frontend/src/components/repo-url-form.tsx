@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
-import { parseGitHubRepoUrl } from "@/lib/github-url";
+import { parseRepoUrl } from "@/lib/repo-api";
 
 export function RepoUrlForm() {
   const router = useRouter();
@@ -10,27 +10,34 @@ export function RepoUrlForm() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const parsedRepo = parseGitHubRepoUrl(repoUrl);
-
-    if (!parsedRepo) {
-      setError(
-        "Enter a GitHub repository URL in the format https://github.com/{owner}/{repo} or https://github.com/{owner}/{repo}.git.",
-      );
+    if (!repoUrl.trim()) {
+      setError("Enter a GitHub repository URL.");
       return;
     }
 
     setError(null);
     setIsSubmitting(true);
 
-    const params = new URLSearchParams({
-      owner: parsedRepo.owner,
-      repo: parsedRepo.repo,
-    });
+    try {
+      const parsedRepo = await parseRepoUrl(repoUrl);
+      const params = new URLSearchParams({
+        owner: parsedRepo.owner,
+        repo: parsedRepo.repo,
+        normalizedUrl: parsedRepo.normalizedUrl,
+      });
 
-    router.push(`/analysis?${params.toString()}`);
+      router.push(`/analysis?${params.toString()}`);
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "RepoFrame could not parse that URL.",
+      );
+      setIsSubmitting(false);
+    }
   }
 
   return (

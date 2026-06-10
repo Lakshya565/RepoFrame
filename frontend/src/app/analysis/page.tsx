@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { buildGitHubRepoUrl, normalizeGitHubRepoName } from "@/lib/github-url";
 
 type AnalysisPageProps = {
   searchParams: Promise<{
     owner?: string | string[];
     repo?: string | string[];
+    normalizedUrl?: string | string[];
   }>;
 };
 
@@ -15,11 +15,10 @@ function getParam(value: string | string[] | undefined): string | null {
 export default async function AnalysisPage({ searchParams }: AnalysisPageProps) {
   const params = await searchParams;
   const owner = getParam(params.owner);
-  const repoParam = getParam(params.repo);
-  const repo = repoParam ? normalizeGitHubRepoName(repoParam) : null;
-  const repoUrl = owner && repo ? buildGitHubRepoUrl(owner, repo) : null;
+  const repo = getParam(params.repo);
+  const normalizedUrl = getParam(params.normalizedUrl);
 
-  if (!owner || !repo || !repoUrl) {
+  if (!owner || !repo || !normalizedUrl) {
     return (
       <main className="min-h-screen bg-slate-50 px-5 py-12 text-slate-950 sm:px-8">
         <section className="mx-auto max-w-2xl rounded-lg border border-red-200 bg-white p-6 shadow-sm">
@@ -73,7 +72,7 @@ export default async function AnalysisPage({ searchParams }: AnalysisPageProps) 
           </dl>
           <a
             className="mt-6 inline-flex min-h-11 items-center rounded-md border border-slate-300 px-4 text-sm font-semibold text-slate-800 transition hover:border-slate-400 hover:bg-slate-50"
-            href={repoUrl}
+            href={normalizedUrl}
             rel="noreferrer"
             target="_blank"
           >

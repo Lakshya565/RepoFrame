@@ -15,7 +15,7 @@ The app will analyze a repository's structure and technical signals, ask the use
 ```text
 RepoFrame/
   frontend/   Next.js app
-  backend/    FastAPI app dependencies and future backend source
+  backend/    FastAPI app
 ```
 
 Current frontend structure:
@@ -34,6 +34,11 @@ Current backend structure:
 
 ```text
 backend/
+  app/
+    main.py
+    routers/
+    schemas/
+    services/
   requirements.txt
 ```
 
@@ -51,17 +56,23 @@ The frontend runs on the port printed by Next.js, usually `http://localhost:3000
 
 ### Backend
 
-```bash
+```powershell
 cd backend
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Backend source files have not been added yet. Once the FastAPI app exists, run it with a command like:
+The backend runs at `http://127.0.0.1:8000`. Check `GET /health` to confirm it is running.
 
-```bash
-uvicorn app.main:app --reload
+The frontend uses `NEXT_PUBLIC_API_BASE_URL` when set, otherwise it calls `http://127.0.0.1:8000`.
+
+Run backend tests with:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m unittest discover -s tests
 ```
 
 ## MVP Goals
@@ -74,6 +85,6 @@ uvicorn app.main:app --reload
 
 ## Current Scope
 
-Phase 1 is implemented on the frontend. The app has a landing page with a GitHub repository URL input, client-side URL validation, loading and error states, and a placeholder analysis page that displays the parsed repository owner and name.
+Phase 2 is implemented. The app has a landing page with a GitHub repository URL input, a FastAPI backend health endpoint, backend repository URL parsing, loading and error states, and a placeholder analysis page that displays the parsed repository owner and name.
 
 GitHub API access, OpenAI generation, database persistence, and authentication are planned but not implemented yet.
