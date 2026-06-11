@@ -124,7 +124,7 @@ Return ranking reasons
 ## Codex Prompt
 
 ```text
-Implement repo file filtering and ranking logic in the backend. Add utilities filter_repo_files and rank_important_files. Filter out dependency folders, build outputs, generated files, lock files, binaries, images, and oversized files. Prioritize README files, package/config files, src/app/pages/components/api/routes/models/schema files, and main entry points. Return the top-ranked files with importance scores and reasons. Display them in the frontend.
+Implement repo file filtering and ranking logic in the backend. Add utilities filter_repo_files and rank_important_files. Prioritize README files, package/config files, src/app/pages/components/api/routes/models/schema files, and main entry points. Filter out dependency folders, build outputs, generated files, lock files, binaries, images, and oversized files. Return the top-ranked files with importance scores and reasons. Display them in the frontend.
 
 Keep the logic deterministic for now. Do not use OpenAI or any LLM calls in this phase.
 ```
