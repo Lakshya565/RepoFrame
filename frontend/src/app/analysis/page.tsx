@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { GitHubRateLimitCard } from "@/components/github-rate-limit-card";
 import { RepoSummaryCard } from "@/components/repo-summary-card";
+import { RepoTreeView } from "@/components/repo-tree-view";
 
 type AnalysisPageProps = {
   searchParams: Promise<{
@@ -52,8 +54,10 @@ export default async function AnalysisPage({ searchParams }: AnalysisPageProps) 
           Back to RepoFrame
         </Link>
 
-        <div className="mt-6">
+        <div className="mt-6 space-y-6">
           <RepoSummaryCard repoUrl={normalizedUrl} />
+          <RepoTreeView repoUrl={normalizedUrl} />
+          <GitHubRateLimitCard />
         </div>
       </section>
     </main>

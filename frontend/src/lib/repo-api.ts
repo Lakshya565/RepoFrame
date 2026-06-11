@@ -14,6 +14,30 @@ export type RepoMetadataResponse = ParsedRepoResponse & {
   htmlUrl: string;
 };
 
+export type RepoFile = {
+  path: string;
+  type: "file" | "directory" | "submodule";
+  size: number | null;
+  url: string | null;
+};
+
+export type RepoTreeResponse = ParsedRepoResponse & {
+  defaultBranch: string;
+  files: RepoFile[];
+  totalFiles: number;
+  totalDirectories: number;
+  isTruncated: boolean;
+};
+
+export type GitHubRateLimitResponse = {
+  limit: number;
+  used: number;
+  remaining: number;
+  reset: number;
+  resetAt: string;
+  isAuthenticated: boolean;
+};
+
 type ApiErrorResponse = {
   detail?: unknown;
 };
@@ -70,6 +94,50 @@ export async function fetchRepoMetadata(
   }
 
   return (await response.json()) as RepoMetadataResponse;
+}
+
+export async function fetchRepoTree(repoUrl: string): Promise<RepoTreeResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/repo/tree`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ repoUrl }),
+  });
+
+  if (!response.ok) {
+    const errorBody = (await response.json().catch(
+      () => ({}),
+    )) as ApiErrorResponse;
+
+    throw new Error(
+      getApiErrorMessage(
+        errorBody,
+        "RepoFrame could not fetch the repository file tree.",
+      ),
+    );
+  }
+
+  return (await response.json()) as RepoTreeResponse;
+}
+
+export async function fetchGitHubRateLimit(): Promise<GitHubRateLimitResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/github/rate-limit`);
+
+  if (!response.ok) {
+    const errorBody = (await response.json().catch(
+      () => ({}),
+    )) as ApiErrorResponse;
+
+    throw new Error(
+      getApiErrorMessage(
+        errorBody,
+        "RepoFrame could not fetch GitHub rate limit status.",
+      ),
+    );
+  }
+
+  return (await response.json()) as GitHubRateLimitResponse;
 }
 
 function getApiErrorMessage(

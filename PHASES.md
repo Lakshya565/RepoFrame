@@ -1,9 +1,6 @@
-# RepoFrame Project Phases
-
-RepoFrame is a full-stack web app that turns GitHub repositories into clear, evidence-backed project writeups.
-
-This file only lists the main project phases from the current point forward. Phase 0, the initial setup/docs stage, is already complete.
-
+# RepoFrame Project Phases 
+- Skip all phases that say (DONE, DO NOT TOUCH)
+- Reminder - Consult AGENTS.md for best coding practices, workflows, and the way I want to implement things. Remember to comment out code for readability and understanding purposes.
 ---
 
 # Phase 1(DONE, DO NOT TOUCH): Basic Frontend Flow
@@ -78,7 +75,7 @@ Implement GitHub public repo metadata fetching in the FastAPI backend. Add a Git
 
 ---
 
-# Phase 4: File Tree Fetching
+# Phase 4(DONE, DO NOT TOUCH): File Tree Fetching
 
 ## Goal
 
@@ -154,9 +151,9 @@ Detected stack evidence
 ## Codex Prompt
 
 ```text
-Implement tech stack detection in the backend. Use repository metadata, file paths, package.json if available, requirements.txt if available, and config files to detect technologies such as React, Next.js, TypeScript, Python, FastAPI, Flask, Node, Express, Tailwind, Supabase, PostgreSQL, SQLite, Pandas, OpenCV, and other common tools. Return detected technologies with confidence and evidence. Display the detected stack in the frontend.
+Implement tech stack detection in the backend. Use repository metadata, file paths, package.json if available, requirements.txt if available, and config files to detect technologies such as React, Next.js, TypeScript, Python, FastAPI, Flask, Node, Express, Tailwind, Supabase, PostgreSQL, SQLite, Pandas, OpenCV, and other common tools. This is not a comprehensive list, so try to detect any and all technologies. Return detected technologies with confidence and evidence. Display the detected stack in the frontend.
 
-Each detected technology should include a short reason or evidence source, such as package.json, requirements.txt, file extension patterns, or config files.
+Each detected technology should include a short reason or evidence source, such as package.json, requirements.txt, file extension patterns, or config files. You can make this like a little bubble next to each entry in the stack. If the README already says what technologies were used, start with that but make sure you have at least one more source of evidence backing that up, to make sure that the user was accurate in their selection.
 ```
 
 ---

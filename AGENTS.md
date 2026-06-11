@@ -12,7 +12,7 @@ The core differentiator is evidence-backed generation. Important claims should c
 - Backend: FastAPI, Python, Pydantic
 - Future database/auth: Supabase, PostgreSQL
 - External APIs: GitHub REST API, OpenAI API
-- Hosting: Vercel frontend, Render/Fly.io/Railway backend
+- Hosting: Vercel frontend, Render backend
 
 ## Coding style
 
@@ -72,3 +72,4 @@ When something is unclear, make a reasonable assumption and state it instead of 
 
 - Update the README when setup steps, project structure, or major behavior changes.
 - Keep examples current with the actual scripts and package layout.
+- Add comments for your code - these should be updated with every change you make, and should explain in an overview style a certain line/lines of code. Try to keep it generalized - if theres a function, explain what the function is and how it accomplishes what it intends to do.
