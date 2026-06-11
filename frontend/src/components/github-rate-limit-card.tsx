@@ -12,6 +12,8 @@ const percentFormatter = new Intl.NumberFormat("en-US", {
   style: "percent",
 });
 
+// Displays GitHub's core REST API budget for the active backend token or IP
+// bucket. This gives a quick signal when local analysis is close to rate limits.
 export function GitHubRateLimitCard() {
   const [rateLimit, setRateLimit] = useState<GitHubRateLimitResponse | null>(
     null,
@@ -19,6 +21,8 @@ export function GitHubRateLimitCard() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Refreshes GitHub's core API budget through the backend, which keeps the
+  // token server-side and avoids exposing secret state to the browser.
   const loadRateLimit = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -37,6 +41,8 @@ export function GitHubRateLimitCard() {
     }
   }, []);
 
+  // Fetches the initial rate-limit status when the card mounts and ignores the
+  // result if the component unmounts before the request completes.
   useEffect(() => {
     let isCurrentRequest = true;
 
@@ -72,6 +78,8 @@ export function GitHubRateLimitCard() {
     };
   }, []);
 
+  // Converts GitHub's UTC reset timestamp into a local display string so the
+  // user knows when the current API bucket will refill.
   const resetTime = useMemo(() => {
     if (!rateLimit) {
       return null;
@@ -149,8 +157,14 @@ export function GitHubRateLimitCard() {
           label="Remaining"
           value={numberFormatter.format(rateLimit.remaining)}
         />
-        <RateLimitStat label="Used" value={numberFormatter.format(rateLimit.used)} />
-        <RateLimitStat label="Limit" value={numberFormatter.format(rateLimit.limit)} />
+        <RateLimitStat
+          label="Used"
+          value={numberFormatter.format(rateLimit.used)}
+        />
+        <RateLimitStat
+          label="Limit"
+          value={numberFormatter.format(rateLimit.limit)}
+        />
       </div>
 
       <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
@@ -172,6 +186,8 @@ type RateLimitStatProps = {
   value: string;
 };
 
+// Small repeated stat block for the rate-limit card's remaining/used/limit
+// values. Keeping it local avoids a shared component before the UI needs one.
 function RateLimitStat({ label, value }: RateLimitStatProps) {
   return (
     <div className="rounded-md border border-slate-200 bg-slate-50 p-3">

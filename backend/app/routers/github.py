@@ -6,6 +6,8 @@ from app.services.github_service import GitHubRateLimitError, fetch_rate_limit
 router = APIRouter(prefix="/api/github", tags=["github"])
 
 
+# Exposes GitHub's current core REST API budget without exposing the backend
+# token. This helps local development avoid surprise rate-limit failures.
 @router.get("/rate-limit", response_model=GitHubRateLimitResponse)
 def get_rate_limit() -> GitHubRateLimitResponse:
     try:

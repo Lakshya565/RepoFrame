@@ -10,12 +10,17 @@ type RepoTreeViewProps = {
 
 const numberFormatter = new Intl.NumberFormat("en-US");
 
+// Fetches GitHub's repository structure and renders it as a compact expandable
+// tree. It intentionally works only with paths/types from the tree API, not file
+// contents, so Phase 4 stays focused on structure.
 export function RepoTreeView({ repoUrl }: RepoTreeViewProps) {
   const [tree, setTree] = useState<RepoTreeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(true);
 
+  // Reloads the file tree for the retry button. It also collapses the tree so a
+  // fresh response starts from the same top-level view every time.
   const loadTree = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -36,6 +41,8 @@ export function RepoTreeView({ repoUrl }: RepoTreeViewProps) {
     }
   }, [repoUrl]);
 
+  // Runs the initial tree fetch for the current repo URL and ignores stale
+  // responses if the page changes before GitHub responds.
   useEffect(() => {
     let isCurrentRequest = true;
 
@@ -72,6 +79,8 @@ export function RepoTreeView({ repoUrl }: RepoTreeViewProps) {
     };
   }, [repoUrl]);
 
+  // Converts GitHub's flat list of file paths into nested nodes only when the
+  // backend response changes. The render path can then stay recursive and simple.
   const treeRoot = useMemo(() => {
     if (!tree) {
       return null;
@@ -80,6 +89,8 @@ export function RepoTreeView({ repoUrl }: RepoTreeViewProps) {
     return buildRepoTree(tree.files);
   }, [tree]);
 
+  // Tracks expanded folders by normalized path. Child rows receive this state
+  // rather than owning their own expansion state, which keeps recursion stable.
   const toggleNode = useCallback((path: string) => {
     setExpandedPaths((currentPaths) => {
       const nextPaths = new Set(currentPaths);
@@ -197,6 +208,8 @@ type RepoTreeRowProps = {
   onToggle: (path: string) => void;
 };
 
+// Renders one file-tree node. Folder nodes expose a caret button and recursively
+// render children only when their path is marked as expanded.
 function RepoTreeRow({ node, expandedPaths, onToggle }: RepoTreeRowProps) {
   const isDirectory = node.type === "directory";
   const hasChildren = node.children.length > 0;
@@ -245,6 +258,7 @@ function RepoTreeRow({ node, expandedPaths, onToggle }: RepoTreeRowProps) {
   );
 }
 
+// Keeps the file-tree panel height stable while the backend fetches structure.
 function RepoTreeLoadingCard() {
   return (
     <article className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">

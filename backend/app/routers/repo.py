@@ -18,6 +18,8 @@ from app.services.repo_parser import RepoUrlParseError, parse_github_repo_url
 router = APIRouter(prefix="/api/repo", tags=["repo"])
 
 
+# Returns normalized owner/repo data for a GitHub URL before analysis starts.
+# The route stays thin and delegates parsing rules to the repo parser service.
 @router.post("/parse", response_model=RepoParseResponse)
 def parse_repo(request: RepoParseRequest) -> RepoParseResponse:
     try:
@@ -32,6 +34,8 @@ def parse_repo(request: RepoParseRequest) -> RepoParseResponse:
     )
 
 
+# Parses the URL, fetches GitHub repo metadata, and shapes it for the frontend.
+# Route logic is limited to service orchestration and HTTP error translation.
 @router.post("/metadata", response_model=RepoMetadataResponse)
 def get_repo_metadata(request: RepoParseRequest) -> RepoMetadataResponse:
     try:
@@ -56,6 +60,8 @@ def get_repo_metadata(request: RepoParseRequest) -> RepoMetadataResponse:
     )
 
 
+# Fetches the default-branch file tree after resolving repo metadata. The
+# metadata call supplies the branch name that GitHub's tree endpoint requires.
 @router.post("/tree", response_model=RepoTreeResponse)
 def get_repo_tree(request: RepoParseRequest) -> RepoTreeResponse:
     try:

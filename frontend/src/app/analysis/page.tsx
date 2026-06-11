@@ -11,10 +11,13 @@ type AnalysisPageProps = {
   }>;
 };
 
+// Pulls one query string value out of Next's possible string-or-array shape.
 function getParam(value: string | string[] | undefined): string | null {
   return typeof value === "string" ? value : null;
 }
 
+// Validates the query params produced by the repo form and leaves live GitHub
+// fetching to client components below. This keeps the route shell thin.
 export default async function AnalysisPage({ searchParams }: AnalysisPageProps) {
   const params = await searchParams;
   const owner = getParam(params.owner);

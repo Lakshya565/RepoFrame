@@ -13,6 +13,9 @@ type MutableRepoTreeNode = Omit<RepoTreeNode, "children"> & {
   childrenByName: Map<string, MutableRepoTreeNode>;
 };
 
+// Builds a nested tree from GitHub's flat path list for expandable UI rendering.
+// Intermediate folder nodes are created as needed while leaf nodes preserve the
+// normalized backend file type.
 export function buildRepoTree(files: RepoFile[]): RepoTreeNode {
   const root = createNode(".", "", "directory");
 
@@ -46,6 +49,8 @@ export function buildRepoTree(files: RepoFile[]): RepoTreeNode {
   return stripIndexes(root);
 }
 
+// Creates the mutable node shape used while building the tree. The Map gives
+// efficient child lookup without exposing implementation details to the UI.
 function createNode(
   name: string,
   path: string,
@@ -61,6 +66,8 @@ function createNode(
   };
 }
 
+// Sorts folders before files and then alphabetically so the display scans like a
+// normal repository browser.
 function sortTree(node: MutableRepoTreeNode) {
   node.children.sort((first, second) => {
     if (first.type === "directory" && second.type !== "directory") {
@@ -77,6 +84,8 @@ function sortTree(node: MutableRepoTreeNode) {
   node.children.forEach(sortTree);
 }
 
+// Calculates file totals for each directory by walking children bottom-up. These
+// counts are shown next to folder rows in the tree view.
 function updateFileCounts(node: MutableRepoTreeNode): number {
   if (node.type === "file" || node.type === "submodule") {
     node.fileCount = 1;
@@ -91,6 +100,8 @@ function updateFileCounts(node: MutableRepoTreeNode): number {
   return node.fileCount;
 }
 
+// Removes the build-only child index map before returning nodes to the frontend
+// component, leaving a plain recursive structure.
 function stripIndexes(node: MutableRepoTreeNode): RepoTreeNode {
   return {
     name: node.name,

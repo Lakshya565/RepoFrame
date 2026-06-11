@@ -14,6 +14,8 @@ from app.services.github_service import (
 )
 
 
+# Small response double that lets service tests exercise parsing and status-code
+# handling without making live GitHub API calls.
 class FakeResponse:
     def __init__(
         self,
@@ -36,6 +38,8 @@ class FakeResponse:
         return self._payload
 
 
+# Covers GitHub service parsing and error mapping without network access. The
+# tests keep GitHub behavior deterministic by injecting fake response objects.
 class GitHubServiceTests(unittest.TestCase):
     def test_fetches_repo_metadata(self) -> None:
         session = Mock()

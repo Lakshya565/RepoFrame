@@ -3,12 +3,16 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
 
+# Shared request body for endpoints that start from a GitHub repo URL. Forbids
+# extra fields so callers cannot silently send unsupported analysis options.
 class RepoParseRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     repo_url: StrictStr = Field(alias="repoUrl", min_length=1, max_length=2048)
 
 
+# Normalized repository identity returned after URL parsing succeeds. Aliases
+# keep Python names idiomatic while matching frontend camelCase JSON.
 class RepoParseResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -17,6 +21,8 @@ class RepoParseResponse(BaseModel):
     normalized_url: str = Field(alias="normalizedUrl")
 
 
+# GitHub repository facts displayed in the frontend summary card. This response
+# intentionally stays small and excludes file contents.
 class RepoMetadataResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -32,6 +38,8 @@ class RepoMetadataResponse(BaseModel):
     html_url: str = Field(alias="htmlUrl")
 
 
+# One normalized file-tree entry returned from GitHub's tree API. RepoFrame uses
+# a smaller type set than GitHub so the frontend can render consistently.
 class RepoFile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -41,6 +49,8 @@ class RepoFile(BaseModel):
     url: str | None = None
 
 
+# Full file-tree payload for the analysis page tree view. Counts are included so
+# the frontend does not need to recalculate summary stats.
 class RepoTreeResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -54,6 +64,8 @@ class RepoTreeResponse(BaseModel):
     is_truncated: bool = Field(alias="isTruncated")
 
 
+# Current GitHub core REST API budget for the backend token or IP bucket. The
+# response reveals token presence, never the token value.
 class GitHubRateLimitResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 

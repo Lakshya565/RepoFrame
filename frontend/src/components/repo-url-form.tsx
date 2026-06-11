@@ -4,12 +4,16 @@ import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { parseRepoUrl } from "@/lib/repo-api";
 
+// Handles the initial repo URL entry flow. It sends raw user input to the
+// backend parser, then routes with only normalized owner/repo/url values.
 export function RepoUrlForm() {
   const router = useRouter();
   const [repoUrl, setRepoUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Validates empty input locally, delegates real GitHub URL parsing to FastAPI,
+  // and hands the normalized repo identity to the analysis route.
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 

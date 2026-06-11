@@ -11,6 +11,8 @@ from app.services.repo_parser import (
 )
 
 
+# Covers supported GitHub URL input and rejects unsafe or ambiguous shapes. The
+# parser is shared by multiple endpoints, so these checks protect the API entry.
 class RepoParserTests(unittest.TestCase):
     def test_parses_browser_url(self) -> None:
         parsed_repo = parse_github_repo_url("https://github.com/openai/codex")

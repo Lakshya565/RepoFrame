@@ -18,6 +18,8 @@ export const metadata: Metadata = {
     "Turn GitHub repositories into evidence-backed project writeups.",
 };
 
+// Root layout applies the shared fonts and page shell classes that every App
+// Router page inherits.
 export default function RootLayout({
   children,
 }: Readonly<{

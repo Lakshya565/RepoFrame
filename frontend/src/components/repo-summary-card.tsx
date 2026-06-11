@@ -14,11 +14,16 @@ type SummaryField = {
 
 const numberFormatter = new Intl.NumberFormat("en-US");
 
+// Fetches and displays the repository metadata used as the first summary of an
+// analysis. The component owns loading, error, retry, and empty states so the
+// route page can stay focused on layout.
 export function RepoSummaryCard({ repoUrl }: RepoSummaryCardProps) {
   const [metadata, setMetadata] = useState<RepoMetadataResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Reloads metadata after a failure using the same repo URL that initialized
+  // the card. This is the retry path shown in the error state.
   const loadMetadata = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -38,6 +43,8 @@ export function RepoSummaryCard({ repoUrl }: RepoSummaryCardProps) {
     }
   }, [repoUrl]);
 
+  // Runs the initial metadata fetch and ignores stale responses if the user
+  // navigates to another repository before the request finishes.
   useEffect(() => {
     let isCurrentRequest = true;
 
@@ -73,6 +80,8 @@ export function RepoSummaryCard({ repoUrl }: RepoSummaryCardProps) {
     };
   }, [repoUrl]);
 
+  // Builds the visible stat list dynamically so optional GitHub fields, such as
+  // primary language, can drop out without leaving empty UI cells.
   const summaryFields = useMemo<SummaryField[]>(() => {
     if (!metadata) {
       return [];
@@ -169,6 +178,8 @@ export function RepoSummaryCard({ repoUrl }: RepoSummaryCardProps) {
   );
 }
 
+// Shows fixed-size placeholders that match the final card shape while the
+// metadata request is in flight.
 function RepoSummaryLoadingCard() {
   return (
     <article className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">

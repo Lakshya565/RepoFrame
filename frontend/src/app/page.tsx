@@ -1,5 +1,7 @@
 import { RepoUrlForm } from "@/components/repo-url-form";
 
+// Landing page for the current RepoFrame flow. It keeps the first screen focused
+// on one action: submit a GitHub repository URL for analysis.
 export default function Home() {
   return (
     <main className="min-h-screen bg-slate-50 px-5 py-12 text-slate-950 sm:px-8">

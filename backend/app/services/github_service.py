@@ -18,12 +18,15 @@ BACKEND_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 load_dotenv(BACKEND_ENV_FILE)
 
 
+# Carries a user-facing GitHub metadata error and matching HTTP status so
+# routers can map service failures directly to HTTP responses.
 class GitHubMetadataError(RuntimeError):
     def __init__(self, message: str, status_code: int) -> None:
         super().__init__(message)
         self.status_code = status_code
 
 
+# Internal repository metadata shape after GitHub's raw JSON is validated.
 @dataclass(frozen=True)
 class GitHubRepoMetadata:
     name: str
@@ -35,18 +38,21 @@ class GitHubRepoMetadata:
     html_url: str
 
 
+# Carries a user-facing GitHub file-tree error and matching HTTP status.
 class GitHubTreeError(RuntimeError):
     def __init__(self, message: str, status_code: int) -> None:
         super().__init__(message)
         self.status_code = status_code
 
 
+# Carries a user-facing GitHub rate-limit error and matching HTTP status.
 class GitHubRateLimitError(RuntimeError):
     def __init__(self, message: str, status_code: int) -> None:
         super().__init__(message)
         self.status_code = status_code
 
 
+# Internal file-tree item shape after GitHub types and paths are normalized.
 @dataclass(frozen=True)
 class GitHubRepoFile:
     path: str
@@ -55,6 +61,7 @@ class GitHubRepoFile:
     url: str | None
 
 
+# Internal tree response shape with both entries and summary counts.
 @dataclass(frozen=True)
 class GitHubRepoTree:
     files: list[GitHubRepoFile]
@@ -63,6 +70,7 @@ class GitHubRepoTree:
     is_truncated: bool
 
 
+# Internal rate-limit shape for the GitHub core REST API bucket.
 @dataclass(frozen=True)
 class GitHubRateLimit:
     limit: int
@@ -73,6 +81,8 @@ class GitHubRateLimit:
     is_authenticated: bool
 
 
+# Fetches the basic repository facts RepoFrame needs for the summary card. The
+# function handles GitHub-specific status codes before parsing the response.
 def fetch_repo_metadata(
     owner: str,
     repo: str,
@@ -125,6 +135,8 @@ def fetch_repo_metadata(
     return _parse_metadata_response(response)
 
 
+# Fetches GitHub's recursive tree for the default branch without file contents.
+# RepoFrame uses this structure in later phases for filtering and ranking.
 def fetch_repo_tree(
     owner: str,
     repo: str,
@@ -186,6 +198,8 @@ def fetch_repo_tree(
     return _parse_tree_response(response)
 
 
+# Fetches the current core REST API rate-limit bucket for the active backend
+# token or unauthenticated IP bucket.
 def fetch_rate_limit(
     session: requests.Session | None = None,
 ) -> GitHubRateLimit:
@@ -224,6 +238,8 @@ def fetch_rate_limit(
     return _parse_rate_limit_response(response)
 
 
+# Builds shared GitHub REST headers and attaches the backend token when present.
+# Keeping this centralized prevents frontend code from ever seeing secrets.
 def _build_headers() -> dict[str, str]:
     headers = {
         "Accept": "application/vnd.github+json",
@@ -238,6 +254,8 @@ def _build_headers() -> dict[str, str]:
     return headers
 
 
+# Converts GitHub's repo JSON into the strict internal metadata shape used by
+# routers and tests.
 def _parse_metadata_response(response: requests.Response) -> GitHubRepoMetadata:
     try:
         raw_payload = response.json()
@@ -266,6 +284,8 @@ def _parse_metadata_response(response: requests.Response) -> GitHubRepoMetadata:
     )
 
 
+# Converts GitHub's recursive tree JSON into normalized repo-file entries and
+# summary counts for the frontend tree view.
 def _parse_tree_response(response: requests.Response) -> GitHubRepoTree:
     try:
         raw_payload = response.json()
@@ -301,6 +321,8 @@ def _parse_tree_response(response: requests.Response) -> GitHubRepoTree:
     )
 
 
+# Extracts the core REST rate-limit bucket from GitHub's broader status payload.
+# Other buckets exist, but current RepoFrame calls use the core REST limit.
 def _parse_rate_limit_response(response: requests.Response) -> GitHubRateLimit:
     try:
         raw_payload = response.json()
@@ -344,6 +366,8 @@ def _parse_rate_limit_response(response: requests.Response) -> GitHubRateLimit:
     )
 
 
+# Normalizes one GitHub tree item while preserving size and API URL fields when
+# GitHub provides them.
 def _parse_tree_item(raw_item: object) -> GitHubRepoFile:
     if not isinstance(raw_item, dict):
         raise GitHubTreeError(
@@ -360,6 +384,7 @@ def _parse_tree_item(raw_item: object) -> GitHubRepoFile:
     )
 
 
+# Normalizes tree paths to slash-separated relative paths for frontend display.
 def _normalize_tree_path(path: str) -> str:
     normalized_path = "/".join(
         part for part in path.replace("\\", "/").split("/") if part
@@ -373,6 +398,8 @@ def _normalize_tree_path(path: str) -> str:
     return normalized_path
 
 
+# Translates GitHub tree item types into RepoFrame's smaller file taxonomy:
+# files, directories, and submodules.
 def _normalize_tree_type(github_type: str) -> str:
     if github_type == "blob":
         return "file"
@@ -389,6 +416,8 @@ def _normalize_tree_type(github_type: str) -> str:
     )
 
 
+# Reads a required string field from a tree entry and converts malformed payloads
+# into a tree-specific service error.
 def _required_tree_string(payload: Mapping[str, object], key: str) -> str:
     value = payload.get(key)
     if not isinstance(value, str) or not value:
@@ -400,6 +429,7 @@ def _required_tree_string(payload: Mapping[str, object], key: str) -> str:
     return value
 
 
+# Reads an optional string field from a tree entry, such as GitHub's API URL.
 def _optional_tree_string(payload: Mapping[str, object], key: str) -> str | None:
     value = payload.get(key)
     if value is None:
@@ -414,6 +444,8 @@ def _optional_tree_string(payload: Mapping[str, object], key: str) -> str | None
     return value
 
 
+# Reads a required string field from repository metadata and reports malformed
+# responses as metadata-specific service errors.
 def _required_string(payload: Mapping[str, object], key: str) -> str:
     value = payload.get(key)
     if not isinstance(value, str) or not value:
@@ -425,6 +457,7 @@ def _required_string(payload: Mapping[str, object], key: str) -> str:
     return value
 
 
+# Reads an optional string metadata field while still rejecting unexpected types.
 def _optional_string(payload: Mapping[str, object], key: str) -> str | None:
     value = payload.get(key)
     if value is None:
@@ -439,6 +472,8 @@ def _optional_string(payload: Mapping[str, object], key: str) -> str | None:
     return value
 
 
+# Reads optional booleans from GitHub tree payloads, currently used for the
+# truncated flag on large recursive trees.
 def _optional_bool(payload: Mapping[str, object], key: str) -> bool | None:
     value = payload.get(key)
     if value is None:
@@ -453,6 +488,7 @@ def _optional_bool(payload: Mapping[str, object], key: str) -> bool | None:
     return value
 
 
+# Reads required integer fields from repository metadata, such as stars/forks.
 def _required_int(payload: Mapping[str, object], key: str) -> int:
     value = payload.get(key)
     if type(value) is not int:
@@ -464,6 +500,7 @@ def _required_int(payload: Mapping[str, object], key: str) -> int:
     return value
 
 
+# Reads required integer fields from GitHub's rate-limit payload.
 def _required_rate_int(payload: Mapping[str, object], key: str) -> int:
     value = payload.get(key)
     if type(value) is not int:
@@ -475,6 +512,7 @@ def _required_rate_int(payload: Mapping[str, object], key: str) -> int:
     return value
 
 
+# Reads optional integer fields from tree entries, such as file size.
 def _optional_int(payload: Mapping[str, object], key: str) -> int | None:
     value = payload.get(key)
     if value is None:

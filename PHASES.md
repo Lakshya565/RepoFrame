@@ -1,6 +1,6 @@
 # RepoFrame Project Phases 
 - Skip all phases that say (DONE, DO NOT TOUCH)
-- Reminder - Consult AGENTS.md for best coding practices, workflows, and the way I want to implement things. Remember to comment out code for readability and understanding purposes.
+- Reminder - Consult AGENTS.md for best coding practices, workflows, and the way I want to implement things. Remember to comment out code for readability and understanding purposes, and update any stale code/comments as required.
 ---
 
 # Phase 1(DONE, DO NOT TOUCH): Basic Frontend Flow

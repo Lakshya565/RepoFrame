@@ -8,6 +8,7 @@ from app.services.repo_parser import INVALID_REPO_URL_MESSAGE
 
 app = FastAPI(title="RepoFrame API")
 
+# Local frontend origins are allowed during development; production can narrow this later.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -20,6 +21,8 @@ app.add_middleware(
 )
 
 
+# Lightweight health check used to confirm the FastAPI process is alive without
+# touching GitHub or any future external services.
 @app.get("/health")
 def health_check() -> dict[str, str]:
     return {"status": "ok"}
@@ -29,6 +32,8 @@ app.include_router(repo.router)
 app.include_router(github.router)
 
 
+# Returns the same friendly URL error for malformed repo request payloads. This
+# keeps validation errors consistent with parser errors from explicit routes.
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(
     _request,
