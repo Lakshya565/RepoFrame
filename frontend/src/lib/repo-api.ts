@@ -29,6 +29,21 @@ export type RepoTreeResponse = ParsedRepoResponse & {
   isTruncated: boolean;
 };
 
+export type RankedRepoFile = {
+  path: string;
+  size: number | null;
+  importanceScore: number;
+  reasons: string[];
+};
+
+export type RepoFileRankingResponse = ParsedRepoResponse & {
+  defaultBranch: string;
+  rankedFiles: RankedRepoFile[];
+  totalFiles: number;
+  rankableFiles: number;
+  returnedFiles: number;
+};
+
 export type GitHubRateLimitResponse = {
   limit: number;
   used: number;
@@ -76,6 +91,19 @@ export async function fetchRepoTree(repoUrl: string): Promise<RepoTreeResponse> 
     "/api/repo/tree",
     repoUrl,
     "RepoFrame could not fetch the repository file tree.",
+  );
+}
+
+// Fetches the deterministic file ranking used by later evidence-gathering
+// phases. The frontend displays backend reasons instead of reimplementing score
+// rules in TypeScript.
+export async function fetchRankedRepoFiles(
+  repoUrl: string,
+): Promise<RepoFileRankingResponse> {
+  return postRepoRequest(
+    "/api/repo/ranked-files",
+    repoUrl,
+    "RepoFrame could not rank important repository files.",
   );
 }
 

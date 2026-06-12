@@ -1,12 +1,15 @@
 from fastapi import APIRouter, HTTPException
 
 from app.schemas.repo import (
+    RankedRepoFile,
+    RepoFileRankingResponse,
     RepoFile,
     RepoMetadataResponse,
     RepoParseRequest,
     RepoParseResponse,
     RepoTreeResponse,
 )
+from app.services.file_ranker import filter_repo_files, rank_important_files
 from app.services.github_service import (
     GitHubMetadataError,
     GitHubTreeError,
@@ -96,4 +99,47 @@ def get_repo_tree(request: RepoParseRequest) -> RepoTreeResponse:
         total_files=tree.total_files,
         total_directories=tree.total_directories,
         is_truncated=tree.is_truncated,
+    )
+
+
+# Fetches the default-branch tree and returns deterministic Phase 5 file
+# selections. The route only orchestrates services and leaves scoring rules in
+# file_ranker.py so future phases can reuse the same ranking behavior.
+@router.post("/ranked-files", response_model=RepoFileRankingResponse)
+def get_ranked_repo_files(request: RepoParseRequest) -> RepoFileRankingResponse:
+    try:
+        parsed_repo = parse_github_repo_url(request.repo_url)
+        metadata = fetch_repo_metadata(parsed_repo.owner, parsed_repo.repo)
+        tree = fetch_repo_tree(
+            parsed_repo.owner,
+            parsed_repo.repo,
+            metadata.default_branch,
+        )
+    except RepoUrlParseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except GitHubMetadataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except GitHubTreeError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    rankable_files = filter_repo_files(tree.files)
+    ranked_files = rank_important_files(tree.files)
+
+    return RepoFileRankingResponse(
+        owner=parsed_repo.owner,
+        repo=parsed_repo.repo,
+        normalized_url=parsed_repo.normalized_url,
+        default_branch=metadata.default_branch,
+        ranked_files=[
+            RankedRepoFile(
+                path=file.path,
+                size=file.size,
+                importance_score=file.importance_score,
+                reasons=file.reasons,
+            )
+            for file in ranked_files
+        ],
+        total_files=tree.total_files,
+        rankable_files=len(rankable_files),
+        returned_files=len(ranked_files),
     )

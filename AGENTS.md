@@ -68,6 +68,9 @@ Use environment variables for API keys and secrets. Never expose secrets to the 
 Before making large changes, briefly explain the plan. After implementing, summarize what changed, what files were touched, and any assumptions or follow-up steps.
 
 When something is unclear, make a reasonable assumption and state it instead of blocking progress.
+
+When the OpenAI API is implemented, I want you to be VERY WARY of running tests on RepoFrame itself. I don't want to be burning tokens because you decided it was optimal to run 20 different tests. Only run tests that are absolutely necessary, and inform me before you try running ANYTHING that might even be remotely related to the AI. I will stop you if you go wild with it.
+
 ## Documentation
 
 - Update the README when setup steps, project structure, or major behavior changes.

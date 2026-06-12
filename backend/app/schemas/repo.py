@@ -64,6 +64,32 @@ class RepoTreeResponse(BaseModel):
     is_truncated: bool = Field(alias="isTruncated")
 
 
+# One important file selected by the deterministic Phase 5 ranking service. The
+# response keeps only the fields needed for review and later content fetching.
+class RankedRepoFile(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    path: str
+    size: int | None = None
+    importance_score: int = Field(alias="importanceScore")
+    reasons: list[str]
+
+
+# File ranking payload for the analysis page. Counts describe the filtering
+# funnel from all tree entries to rankable files to the returned top set.
+class RepoFileRankingResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    owner: str
+    repo: str
+    normalized_url: str = Field(alias="normalizedUrl")
+    default_branch: str = Field(alias="defaultBranch")
+    ranked_files: list[RankedRepoFile] = Field(alias="rankedFiles")
+    total_files: int = Field(alias="totalFiles")
+    rankable_files: int = Field(alias="rankableFiles")
+    returned_files: int = Field(alias="returnedFiles")
+
+
 # Current GitHub core REST API budget for the backend token or IP bucket. The
 # response reveals token presence, never the token value.
 class GitHubRateLimitResponse(BaseModel):
