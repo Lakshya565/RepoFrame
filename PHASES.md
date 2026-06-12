@@ -151,9 +151,9 @@ Detected stack evidence
 ## Codex Prompt
 
 ```text
-Implement tech stack detection in the backend. Use repository metadata, file paths, package.json if available, requirements.txt if available, and config files to detect technologies such as React, Next.js, TypeScript, Python, FastAPI, Flask, Node, Express, Tailwind, Supabase, PostgreSQL, SQLite, Pandas, OpenCV, and other common tools. This is not a comprehensive list, so try to detect any and all technologies. Return detected technologies with confidence and evidence. Display the detected stack in the frontend.
+Implement tech stack detection in the backend. Use repository metadata, file paths, package.json if available, requirements.txt if available, and config files to detect technologies such as React, Next.js, TypeScript, Python, FastAPI, Flask, Node, Express, Tailwind, Supabase, PostgreSQL, SQLite, Pandas, OpenCV, and other common tools. This is not a comprehensive list, so try to detect any and all technologies. Return detected technologies with confidence and evidence. Display the detected stack in the frontend in its own card. A cool feature, if possible, would be to have each tool's logo next to it at the same size as the text, but it's ok if you can't do that just yet. 
 
-Each detected technology should include a short reason or evidence source, such as package.json, requirements.txt, file extension patterns, or config files. You can make this like a little bubble next to each entry in the stack. If the README already says what technologies were used, start with that but make sure you have at least one more source of evidence backing that up, to make sure that the user was accurate in their selection.
+Each detected technology should include a short reason or evidence source, such as package.json, requirements.txt, file extension patterns, or config files(note - since you have the list of important files in the repo from Phase 5, you should ONLY use those files for your evidence gathering). You can make this like a little bubble(s) next to each entry in the stack. If the README already says what technologies were used, start with that but make sure you have at least one more source of evidence backing that up from anywhere else in the important files.
 ```
 
 ---
