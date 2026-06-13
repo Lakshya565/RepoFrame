@@ -1,15 +1,18 @@
 import unittest
+import base64
 from unittest.mock import Mock, patch
 
 from requests import RequestException
 
 from app.services.github_service import (
     GITHUB_TOKEN_ENV,
+    GitHubFileContentError,
     GitHubMetadataError,
     GitHubRateLimitError,
     GitHubTreeError,
     fetch_repo_metadata,
     fetch_rate_limit,
+    fetch_repo_text_file,
     fetch_repo_tree,
 )
 
@@ -210,6 +213,57 @@ class GitHubServiceTests(unittest.TestCase):
             fetch_repo_tree("openai", "codex", "main", session=session)
 
         self.assertEqual(context.exception.status_code, 429)
+
+    def test_fetches_text_file_content(self) -> None:
+        session = Mock()
+        encoded_content = base64.b64encode(b'{"dependencies":{}}').decode("ascii")
+        session.get.return_value = FakeResponse(
+            status_code=200,
+            payload={
+                "type": "file",
+                "size": 19,
+                "encoding": "base64",
+                "content": encoded_content,
+            },
+        )
+
+        file_content = fetch_repo_text_file(
+            "openai",
+            "codex",
+            "package.json",
+            "main",
+            100,
+            session=session,
+        )
+
+        self.assertEqual(file_content.path, "package.json")
+        self.assertEqual(file_content.content, '{"dependencies":{}}')
+        self.assertEqual(file_content.size, 19)
+        self.assertEqual(session.get.call_args.kwargs["params"], {"ref": "main"})
+
+    def test_rejects_oversized_text_file_content(self) -> None:
+        session = Mock()
+        session.get.return_value = FakeResponse(
+            status_code=200,
+            payload={
+                "type": "file",
+                "size": 101,
+                "encoding": "base64",
+                "content": "",
+            },
+        )
+
+        with self.assertRaises(GitHubFileContentError) as context:
+            fetch_repo_text_file(
+                "openai",
+                "codex",
+                "README.md",
+                "main",
+                100,
+                session=session,
+            )
+
+        self.assertEqual(context.exception.status_code, 413)
 
     def test_fetches_rate_limit_status(self) -> None:
         session = Mock()

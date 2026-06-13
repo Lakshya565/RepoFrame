@@ -41,11 +41,42 @@ export function ImportantFilesCard({ repoUrl }: ImportantFilesCardProps) {
     }
   }, [repoUrl]);
 
-  // Reuses the same fetch path for initial load and retries so error handling
-  // stays consistent without duplicating request logic.
+  // Runs the initial ranking fetch for the current repo URL and ignores stale
+  // responses if the page changes before the backend responds.
   useEffect(() => {
-    void loadRanking();
-  }, [loadRanking]);
+    let isCurrentRequest = true;
+
+    async function run() {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const rankedFiles = await fetchRankedRepoFiles(repoUrl);
+        if (isCurrentRequest) {
+          setRanking(rankedFiles);
+        }
+      } catch (error) {
+        if (isCurrentRequest) {
+          setRanking(null);
+          setError(
+            error instanceof Error
+              ? error.message
+              : "RepoFrame could not rank important repository files.",
+          );
+        }
+      } finally {
+        if (isCurrentRequest) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    run();
+
+    return () => {
+      isCurrentRequest = false;
+    };
+  }, [repoUrl]);
 
   if (isLoading) {
     return <ImportantFilesLoadingCard />;

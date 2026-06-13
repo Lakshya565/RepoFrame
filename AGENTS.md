@@ -71,6 +71,8 @@ When something is unclear, make a reasonable assumption and state it instead of 
 
 When the OpenAI API is implemented, I want you to be VERY WARY of running tests on RepoFrame itself. I don't want to be burning tokens because you decided it was optimal to run 20 different tests. Only run tests that are absolutely necessary, and inform me before you try running ANYTHING that might even be remotely related to the AI. I will stop you if you go wild with it.
 
+Do not start frontend dev servers, browser smoke tests, or local UI preview sessions unless I explicitly ask for them. I can run and visually verify the frontend myself. Prefer static checks such as lint, TypeScript checks, and focused backend tests when they are enough to validate the change.
+
 ## Documentation
 
 - Update the README when setup steps, project structure, or major behavior changes.

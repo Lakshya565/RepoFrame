@@ -90,6 +90,39 @@ class RepoFileRankingResponse(BaseModel):
     returned_files: int = Field(alias="returnedFiles")
 
 
+# One evidence point behind a detected technology. Paths are included when the
+# source is one of the important files selected by the backend.
+class TechStackEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source: str
+    detail: str
+    path: str | None = None
+
+
+# One detected technology with a confidence score and auditable evidence.
+class DetectedTechnology(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    category: str
+    confidence: float
+    evidence: list[TechStackEvidence]
+
+
+# Phase 6 stack-detection payload for the analysis page. The evidence file count
+# shows how many ranked README or manifest files were read for detection.
+class TechStackResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    owner: str
+    repo: str
+    normalized_url: str = Field(alias="normalizedUrl")
+    default_branch: str = Field(alias="defaultBranch")
+    technologies: list[DetectedTechnology]
+    evidence_files_read: int = Field(alias="evidenceFilesRead")
+
+
 # Current GitHub core REST API budget for the backend token or IP bucket. The
 # response reveals token presence, never the token value.
 class GitHubRateLimitResponse(BaseModel):

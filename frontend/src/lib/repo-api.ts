@@ -44,6 +44,25 @@ export type RepoFileRankingResponse = ParsedRepoResponse & {
   returnedFiles: number;
 };
 
+export type TechStackEvidence = {
+  source: string;
+  detail: string;
+  path: string | null;
+};
+
+export type DetectedTechnology = {
+  name: string;
+  category: string;
+  confidence: number;
+  evidence: TechStackEvidence[];
+};
+
+export type TechStackResponse = ParsedRepoResponse & {
+  defaultBranch: string;
+  technologies: DetectedTechnology[];
+  evidenceFilesRead: number;
+};
+
 export type GitHubRateLimitResponse = {
   limit: number;
   used: number;
@@ -104,6 +123,18 @@ export async function fetchRankedRepoFiles(
     "/api/repo/ranked-files",
     repoUrl,
     "RepoFrame could not rank important repository files.",
+  );
+}
+
+// Fetches the deterministic Phase 6 stack detection results. The backend owns
+// evidence gathering and confidence rules so the UI can stay display-focused.
+export async function fetchTechStack(
+  repoUrl: string,
+): Promise<TechStackResponse> {
+  return postRepoRequest(
+    "/api/repo/tech-stack",
+    repoUrl,
+    "RepoFrame could not detect the repository tech stack.",
   );
 }
 

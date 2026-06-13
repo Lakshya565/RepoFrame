@@ -1,4 +1,5 @@
 import os
+import base64
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -52,6 +53,13 @@ class GitHubRateLimitError(RuntimeError):
         self.status_code = status_code
 
 
+# Carries a user-facing GitHub file-content error and matching HTTP status.
+class GitHubFileContentError(RuntimeError):
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
 # Internal file-tree item shape after GitHub types and paths are normalized.
 @dataclass(frozen=True)
 class GitHubRepoFile:
@@ -79,6 +87,14 @@ class GitHubRateLimit:
     reset: int
     reset_at: str
     is_authenticated: bool
+
+
+# Internal text-file content shape after GitHub's content payload is decoded.
+@dataclass(frozen=True)
+class GitHubTextFileContent:
+    path: str
+    content: str
+    size: int
 
 
 # Fetches the basic repository facts RepoFrame needs for the summary card. The
@@ -196,6 +212,66 @@ def fetch_repo_tree(
         )
 
     return _parse_tree_response(response)
+
+
+# Fetches one small text file from GitHub's contents API. Phase 6 uses this only
+# for ranked README and dependency manifest files; broader source fetching waits
+# for the bounded evidence pipeline in Phase 7.
+def fetch_repo_text_file(
+    owner: str,
+    repo: str,
+    path: str,
+    ref: str,
+    max_size_bytes: int,
+    session: requests.Session | None = None,
+) -> GitHubTextFileContent:
+    client = session or requests.Session()
+    encoded_path = quote(path, safe="/")
+
+    try:
+        response = client.get(
+            f"{GITHUB_API_BASE_URL}/repos/{owner}/{repo}/contents/{encoded_path}",
+            params={"ref": ref},
+            headers=_build_headers(),
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+    except RequestException as exc:
+        raise GitHubFileContentError(
+            "RepoFrame could not reach GitHub for repository file contents.",
+            502,
+        ) from exc
+
+    if response.status_code == 404:
+        raise GitHubFileContentError(
+            "GitHub could not find a selected repository file.",
+            404,
+        )
+
+    if response.status_code == 403:
+        if response.headers.get("x-ratelimit-remaining") == "0":
+            raise GitHubFileContentError(
+                "GitHub rate limit reached. Add a GITHUB_TOKEN on the backend or try again later.",
+                429,
+            )
+
+        raise GitHubFileContentError(
+            "GitHub denied access to a selected repository file.",
+            403,
+        )
+
+    if response.status_code >= 500:
+        raise GitHubFileContentError(
+            "GitHub is not available right now. Please try again.",
+            502,
+        )
+
+    if not response.ok:
+        raise GitHubFileContentError(
+            "RepoFrame could not fetch a selected repository file.",
+            502,
+        )
+
+    return _parse_text_file_response(response, path, max_size_bytes)
 
 
 # Fetches the current core REST API rate-limit bucket for the active backend
@@ -318,6 +394,65 @@ def _parse_tree_response(response: requests.Response) -> GitHubRepoTree:
         total_files=total_files,
         total_directories=total_directories,
         is_truncated=_optional_bool(payload, "truncated") or False,
+    )
+
+
+# Converts GitHub's contents API payload into UTF-8 text after enforcing the
+# caller's size budget and rejecting directories or unsupported encodings.
+def _parse_text_file_response(
+    response: requests.Response,
+    expected_path: str,
+    max_size_bytes: int,
+) -> GitHubTextFileContent:
+    try:
+        raw_payload = response.json()
+    except ValueError as exc:
+        raise GitHubFileContentError(
+            "GitHub returned an unreadable file-content response.",
+            502,
+        ) from exc
+
+    if not isinstance(raw_payload, dict):
+        raise GitHubFileContentError(
+            "GitHub returned file content in an unexpected format.",
+            502,
+        )
+
+    payload = cast(Mapping[str, object], raw_payload)
+    if payload.get("type") != "file":
+        raise GitHubFileContentError(
+            "GitHub returned a non-file item for selected content.",
+            502,
+        )
+
+    size = _required_content_int(payload, "size")
+    if size > max_size_bytes:
+        raise GitHubFileContentError(
+            "Selected repository file is too large for Phase 6 stack detection.",
+            413,
+        )
+
+    if payload.get("encoding") != "base64":
+        raise GitHubFileContentError(
+            "GitHub returned selected file content with an unsupported encoding.",
+            502,
+        )
+
+    raw_content = _required_content_string(payload, "content")
+
+    try:
+        decoded_bytes = base64.b64decode(raw_content, validate=False)
+        content = decoded_bytes.decode("utf-8")
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise GitHubFileContentError(
+            "Selected repository file is not readable UTF-8 text.",
+            415,
+        ) from exc
+
+    return GitHubTextFileContent(
+        path=expected_path,
+        content=content,
+        size=size,
     )
 
 
@@ -444,6 +579,18 @@ def _optional_tree_string(payload: Mapping[str, object], key: str) -> str | None
     return value
 
 
+# Reads a required string field from GitHub's content payload.
+def _required_content_string(payload: Mapping[str, object], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str):
+        raise GitHubFileContentError(
+            "GitHub returned file content with missing required fields.",
+            502,
+        )
+
+    return value
+
+
 # Reads a required string field from repository metadata and reports malformed
 # responses as metadata-specific service errors.
 def _required_string(payload: Mapping[str, object], key: str) -> str:
@@ -506,6 +653,18 @@ def _required_rate_int(payload: Mapping[str, object], key: str) -> int:
     if type(value) is not int:
         raise GitHubRateLimitError(
             "GitHub returned rate limit status with invalid number fields.",
+            502,
+        )
+
+    return value
+
+
+# Reads required integer fields from GitHub's content payload, such as file size.
+def _required_content_int(payload: Mapping[str, object], key: str) -> int:
+    value = payload.get(key)
+    if type(value) is not int:
+        raise GitHubFileContentError(
+            "GitHub returned file content with invalid number fields.",
             502,
         )
 

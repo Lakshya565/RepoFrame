@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
 from app.schemas.repo import (
+    DetectedTechnology,
     RankedRepoFile,
     RepoFileRankingResponse,
     RepoFile,
@@ -8,15 +9,24 @@ from app.schemas.repo import (
     RepoParseRequest,
     RepoParseResponse,
     RepoTreeResponse,
+    TechStackEvidence,
+    TechStackResponse,
 )
 from app.services.file_ranker import filter_repo_files, rank_important_files
 from app.services.github_service import (
+    GitHubFileContentError,
     GitHubMetadataError,
     GitHubTreeError,
+    fetch_repo_text_file,
     fetch_repo_metadata,
     fetch_repo_tree,
 )
 from app.services.repo_parser import RepoUrlParseError, parse_github_repo_url
+from app.services.tech_stack_detector import (
+    MAX_STACK_EVIDENCE_FILE_SIZE_BYTES,
+    detect_tech_stack,
+    select_stack_evidence_files,
+)
 
 router = APIRouter(prefix="/api/repo", tags=["repo"])
 
@@ -142,4 +152,72 @@ def get_ranked_repo_files(request: RepoParseRequest) -> RepoFileRankingResponse:
         total_files=tree.total_files,
         rankable_files=len(rankable_files),
         returned_files=len(ranked_files),
+    )
+
+
+# Reuses Phase 5 ranked files to detect the repository stack. Phase 6 reads only
+# ranked README and manifest/config files; broad source-content fetching belongs
+# to the bounded evidence pipeline in Phase 7.
+@router.post("/tech-stack", response_model=TechStackResponse)
+def get_repo_tech_stack(request: RepoParseRequest) -> TechStackResponse:
+    try:
+        parsed_repo = parse_github_repo_url(request.repo_url)
+        metadata = fetch_repo_metadata(parsed_repo.owner, parsed_repo.repo)
+        tree = fetch_repo_tree(
+            parsed_repo.owner,
+            parsed_repo.repo,
+            metadata.default_branch,
+        )
+        ranked_files = rank_important_files(tree.files)
+        stack_evidence_files = select_stack_evidence_files(ranked_files)
+        file_contents = []
+        for file in stack_evidence_files:
+            try:
+                file_contents.append(
+                    fetch_repo_text_file(
+                        parsed_repo.owner,
+                        parsed_repo.repo,
+                        file.path,
+                        metadata.default_branch,
+                        MAX_STACK_EVIDENCE_FILE_SIZE_BYTES,
+                    )
+                )
+            except GitHubFileContentError as exc:
+                # Phase 6 can still use path and metadata evidence when one
+                # optional manifest is missing, oversized, or not UTF-8 text.
+                if exc.status_code not in {404, 413, 415}:
+                    raise
+    except RepoUrlParseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except GitHubMetadataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except GitHubTreeError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except GitHubFileContentError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    technologies = detect_tech_stack(metadata, ranked_files, file_contents)
+
+    return TechStackResponse(
+        owner=parsed_repo.owner,
+        repo=parsed_repo.repo,
+        normalized_url=parsed_repo.normalized_url,
+        default_branch=metadata.default_branch,
+        technologies=[
+            DetectedTechnology(
+                name=technology.name,
+                category=technology.category,
+                confidence=technology.confidence,
+                evidence=[
+                    TechStackEvidence(
+                        source=evidence.source,
+                        detail=evidence.detail,
+                        path=evidence.path,
+                    )
+                    for evidence in technology.evidence
+                ],
+            )
+            for technology in technologies
+        ],
+        evidence_files_read=len(file_contents),
     )
