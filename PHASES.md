@@ -131,7 +131,7 @@ Keep the logic deterministic for now. Do not use OpenAI or any LLM calls in this
 
 ---
 
-# Phase 6: Tech Stack Detection
+# Phase 6(DONE, DO NOT TOUCH): Tech Stack Detection
 
 ## Goal
 
