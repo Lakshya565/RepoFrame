@@ -158,7 +158,7 @@ Each detected technology should include a short reason or evidence source, such 
 
 ---
 
-# Phase 7: Fetch Selected File Contents
+# Phase 7(DONE, DO NOT TOUCH): Fetch Selected File Contents
 
 ## Goal
 

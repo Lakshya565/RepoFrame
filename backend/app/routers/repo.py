@@ -3,15 +3,19 @@ from fastapi import APIRouter, HTTPException
 from app.schemas.repo import (
     DetectedTechnology,
     RankedRepoFile,
+    RepoFileContentResponse,
     RepoFileRankingResponse,
     RepoFile,
     RepoMetadataResponse,
     RepoParseRequest,
     RepoParseResponse,
     RepoTreeResponse,
+    SelectedFileEvidence,
+    SkippedFileEvidence,
     TechStackEvidence,
     TechStackResponse,
 )
+from app.services.file_content_service import collect_file_evidence
 from app.services.file_ranker import filter_repo_files, rank_important_files
 from app.services.github_service import (
     GitHubFileContentError,
@@ -220,4 +224,67 @@ def get_repo_tech_stack(request: RepoParseRequest) -> TechStackResponse:
             for technology in technologies
         ],
         evidence_files_read=len(file_contents),
+    )
+
+
+# Reuses Phase 5 rankings to fetch bounded README, config, and top source file
+# contents for later AI steps. The route only orchestrates services and maps
+# errors; all selection and limit logic lives in file_content_service so future
+# phases can reuse the same safe evidence bundle.
+@router.post("/file-contents", response_model=RepoFileContentResponse)
+def get_repo_file_contents(request: RepoParseRequest) -> RepoFileContentResponse:
+    try:
+        parsed_repo = parse_github_repo_url(request.repo_url)
+        metadata = fetch_repo_metadata(parsed_repo.owner, parsed_repo.repo)
+        tree = fetch_repo_tree(
+            parsed_repo.owner,
+            parsed_repo.repo,
+            metadata.default_branch,
+        )
+        ranked_files = rank_important_files(tree.files)
+        evidence = collect_file_evidence(
+            parsed_repo.owner,
+            parsed_repo.repo,
+            metadata.default_branch,
+            ranked_files,
+        )
+    except RepoUrlParseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except GitHubMetadataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except GitHubTreeError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except GitHubFileContentError as exc:
+        # The evidence service skips tolerable per-file failures itself, so any
+        # error that reaches here is systemic (rate limit, auth, upstream).
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    return RepoFileContentResponse(
+        owner=parsed_repo.owner,
+        repo=parsed_repo.repo,
+        normalized_url=parsed_repo.normalized_url,
+        default_branch=metadata.default_branch,
+        selected_files=[
+            SelectedFileEvidence(
+                path=file.path,
+                source_type=file.source_type,
+                reason=file.reason,
+                content=file.content,
+                original_size=file.original_size,
+                truncated=file.truncated,
+                char_count=file.char_count,
+            )
+            for file in evidence.selected_files
+        ],
+        skipped_files=[
+            SkippedFileEvidence(
+                path=file.path,
+                source_type=file.source_type,
+                reason=file.reason,
+            )
+            for file in evidence.skipped_files
+        ],
+        selected_count=len(evidence.selected_files),
+        skipped_count=len(evidence.skipped_files),
+        total_characters=evidence.total_characters,
     )

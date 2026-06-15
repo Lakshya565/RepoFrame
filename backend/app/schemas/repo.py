@@ -123,6 +123,47 @@ class TechStackResponse(BaseModel):
     evidence_files_read: int = Field(alias="evidenceFilesRead")
 
 
+# One fetched evidence file returned by the Phase 7 bounded content pipeline.
+# Keeps auditability: where the file came from, why it was chosen, its original
+# size, and whether the stored excerpt was trimmed to fit the limits.
+class SelectedFileEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    path: str
+    source_type: Literal["readme", "config", "source"] = Field(alias="sourceType")
+    reason: str
+    content: str
+    original_size: int | None = Field(default=None, alias="originalSize")
+    truncated: bool
+    char_count: int = Field(alias="charCount")
+
+
+# One file RepoFrame chose not to include, with a plain-language skip reason such
+# as oversized, missing, non-text, or beyond the selection/character limits.
+class SkippedFileEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    path: str
+    source_type: Literal["readme", "config", "source"] = Field(alias="sourceType")
+    reason: str
+
+
+# Phase 7 bounded evidence payload for the analysis page. Counts describe the
+# selection funnel and the running character total enforced across all excerpts.
+class RepoFileContentResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    owner: str
+    repo: str
+    normalized_url: str = Field(alias="normalizedUrl")
+    default_branch: str = Field(alias="defaultBranch")
+    selected_files: list[SelectedFileEvidence] = Field(alias="selectedFiles")
+    skipped_files: list[SkippedFileEvidence] = Field(alias="skippedFiles")
+    selected_count: int = Field(alias="selectedCount")
+    skipped_count: int = Field(alias="skippedCount")
+    total_characters: int = Field(alias="totalCharacters")
+
+
 # Current GitHub core REST API budget for the backend token or IP bucket. The
 # response reveals token presence, never the token value.
 class GitHubRateLimitResponse(BaseModel):

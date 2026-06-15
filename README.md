@@ -87,6 +87,17 @@ cd backend
 
 ## Current Scope
 
-Phase 3 is implemented. The app has a landing page with a GitHub repository URL input, a FastAPI backend health endpoint, backend repository URL parsing, public GitHub repository metadata fetching, loading and error states, and an analysis page that displays a repository summary card.
+Phases 1 through 7 are implemented. The app has a landing page with a GitHub repository URL input, loading and error states, and an analysis page driven by a FastAPI backend. The backend currently exposes:
+
+- `GET /health` — service health check.
+- `POST /api/repo/parse` — normalize a GitHub URL into owner/repo.
+- `POST /api/repo/metadata` — fetch public repository metadata.
+- `POST /api/repo/tree` — fetch the default-branch file tree.
+- `POST /api/repo/ranked-files` — deterministic filtering and ranking of important files.
+- `POST /api/repo/tech-stack` — detect technologies with evidence and confidence.
+- `POST /api/repo/file-contents` — fetch bounded README, config, and top source file excerpts.
+- `GET /api/github/rate-limit` — report the current GitHub REST API budget.
+
+Phase 7 file-content fetching is intentionally bounded: it selects README, dependency/config manifests, and the top-ranked source files, then enforces a maximum number of files, a per-file character limit, and a total character limit across all excerpts. Files that are missing, oversized, non-text, or beyond the limits are returned as skipped with a clear reason, so the evidence stays small and auditable.
 
 OpenAI generation, database persistence, and authentication are planned but not implemented yet.

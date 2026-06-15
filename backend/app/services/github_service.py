@@ -214,9 +214,9 @@ def fetch_repo_tree(
     return _parse_tree_response(response)
 
 
-# Fetches one small text file from GitHub's contents API. Phase 6 uses this only
-# for ranked README and dependency manifest files; broader source fetching waits
-# for the bounded evidence pipeline in Phase 7.
+# Fetches one small text file from GitHub's contents API. Shared by Phase 6 stack
+# detection and the Phase 7 bounded evidence pipeline; callers pass their own size
+# budget and decide how to handle missing, oversized, or non-text files.
 def fetch_repo_text_file(
     owner: str,
     repo: str,
@@ -428,7 +428,7 @@ def _parse_text_file_response(
     size = _required_content_int(payload, "size")
     if size > max_size_bytes:
         raise GitHubFileContentError(
-            "Selected repository file is too large for Phase 6 stack detection.",
+            "Selected repository file is too large to fetch.",
             413,
         )
 
