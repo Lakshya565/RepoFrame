@@ -193,7 +193,7 @@ Do not add OpenAI calls yet. This phase should only prepare safe, bounded repo e
 
 ---
 
-# Phase 8: Token, Cost, and Abuse Protection
+# Phase 8(DONE, DO NOT TOUCH): Token, Cost, and Abuse Protection
 
 ## Goal
 

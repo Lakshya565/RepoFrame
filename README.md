@@ -25,7 +25,9 @@ frontend/
   public/
   src/app/
   src/components/
+    user-context-form.tsx  ← Phase 9: user context questionnaire
   src/lib/
+    user-context.ts        ← Phase 9: questionnaire data shapes and field metadata
   package.json
   tsconfig.json
 ```
@@ -36,9 +38,11 @@ Current backend structure:
 backend/
   app/
     main.py
+    config.py          ← Phase 8: centralized limits, API key, rate-limit placeholders
     routers/
     schemas/
     services/
+      token_estimator.py  ← Phase 8: prompt budget check and token estimation
   requirements.txt
 ```
 
@@ -66,7 +70,7 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 The backend runs at `http://127.0.0.1:8000`. Check `GET /health` to confirm it is running.
 
-Local backend secrets live in `backend/.env`, which is ignored by Git. `GITHUB_TOKEN` is optional for public repository metadata fetching. Without it, RepoFrame uses GitHub's unauthenticated public API rate limit.
+Local backend secrets live in `backend/.env`, which is ignored by Git. Copy `backend/.env.example` as a starting point. `GITHUB_TOKEN` is optional; without it RepoFrame uses GitHub's unauthenticated public API rate limit. `OPENAI_API_KEY` will be required from Phase 10 onward and must only ever appear in the backend `.env` — it is never passed to the frontend.
 
 The frontend uses `NEXT_PUBLIC_API_BASE_URL` when set, otherwise it calls `http://127.0.0.1:8000`.
 
@@ -87,7 +91,7 @@ cd backend
 
 ## Current Scope
 
-Phases 1 through 7 are implemented. The app has a landing page with a GitHub repository URL input, loading and error states, and an analysis page driven by a FastAPI backend. The backend currently exposes:
+Phases 1 through 9 are implemented. The app has a landing page with a GitHub repository URL input, loading and error states, and an analysis page driven by a FastAPI backend. The backend currently exposes:
 
 - `GET /health` — service health check.
 - `POST /api/repo/parse` — normalize a GitHub URL into owner/repo.
@@ -99,5 +103,15 @@ Phases 1 through 7 are implemented. The app has a landing page with a GitHub rep
 - `GET /api/github/rate-limit` — report the current GitHub REST API budget.
 
 Phase 7 file-content fetching is intentionally bounded: it selects README, dependency/config manifests, and the top-ranked source files, then enforces a maximum number of files, a per-file character limit, and a total character limit across all excerpts. Files that are missing, oversized, non-text, or beyond the limits are returned as skipped with a clear reason, so the evidence stays small and auditable.
+
+Phase 8 added token, cost, and abuse protection in preparation for OpenAI integration:
+
+- All safety limits (`MAX_SELECTED_FILES`, `MAX_CHARS_PER_FILE`, `MAX_TOTAL_PROMPT_CHARS`, `MAX_FILE_SIZE_BYTES`) are now centralized in `app/config.py` and readable from environment variables.
+- `OPENAI_API_KEY` is read from the backend environment only and is never exposed to the frontend.
+- `app/services/token_estimator.py` provides `estimate_input_tokens()` and `check_prompt_budget()` for validating evidence size before any OpenAI call.
+- Per-session, per-IP, and global daily analysis caps are defined in config with placeholder comments marking where Phase 16 rate-limiting middleware should be wired in.
+- An optional `ACCESS_PASSWORD` gate is available in config for early controlled deployments.
+
+Phase 9 added a user context questionnaire on the analysis page. It collects the project facts the repository cannot reveal — purpose, solo/team status, the user's own contribution, target user or client, hardest technical part, and optional measurable impact. Answers are held in frontend state only (no backend or database persistence yet): the form saves to a read-only summary and can be re-opened for editing. This context will ground later generation phases so RepoFrame does not guess intent, ownership, or impact.
 
 OpenAI generation, database persistence, and authentication are planned but not implemented yet.

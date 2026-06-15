@@ -2,6 +2,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
+from app.config import (
+    MAX_CHARS_PER_FILE,
+    MAX_FILE_SIZE_BYTES,
+    MAX_SELECTED_FILES,
+    MAX_TOTAL_PROMPT_CHARS,
+)
 from app.services.file_ranker import RankedRepoFile
 from app.services.github_service import (
     GitHubFileContentError,
@@ -9,16 +15,11 @@ from app.services.github_service import (
     fetch_repo_text_file,
 )
 
-# Phase 7 safety limits. These are intentionally bounded so the analysis never
-# pulls an entire repository: a small number of files, a per-file character cap,
-# and a total character cap across all fetched content. Phase 8 will centralize
-# and make these configurable; for now they live with the evidence service.
-MAX_SELECTED_FILES = 12
-MAX_CHARS_PER_FILE = 12_000
-MAX_TOTAL_CHARS = 60_000
-# GitHub size budget passed to the contents API. Files larger than this are
-# skipped before download instead of being fetched and trimmed.
-MAX_FILE_SIZE_BYTES = 100_000
+# Convenience alias so internal logic reads naturally against what the limit
+# means in this service (total characters across all fetched evidence files).
+# The canonical name MAX_TOTAL_PROMPT_CHARS lives in config.py because Phase 10
+# will also enforce it before sending evidence to OpenAI.
+MAX_TOTAL_CHARS = MAX_TOTAL_PROMPT_CHARS
 
 README_NAMES = {"readme", "readme.md", "readme.mdx", "readme.txt"}
 

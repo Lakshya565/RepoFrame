@@ -4,6 +4,7 @@ import { ImportantFilesCard } from "@/components/important-files-card";
 import { RepoSummaryCard } from "@/components/repo-summary-card";
 import { RepoTreeView } from "@/components/repo-tree-view";
 import { TechStackCard } from "@/components/tech-stack-card";
+import { UserContextForm } from "@/components/user-context-form";
 
 type AnalysisPageProps = {
   searchParams: Promise<{
@@ -64,6 +65,7 @@ export default async function AnalysisPage({ searchParams }: AnalysisPageProps) 
           <TechStackCard repoUrl={normalizedUrl} />
           <ImportantFilesCard repoUrl={normalizedUrl} />
           <RepoTreeView repoUrl={normalizedUrl} />
+          <UserContextForm />
           <GitHubRateLimitCard />
         </div>
       </section>

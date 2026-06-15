@@ -1,13 +1,12 @@
 import unittest
 
-from app.services.file_content_service import (
+from app.config import (
     MAX_CHARS_PER_FILE,
     MAX_FILE_SIZE_BYTES,
     MAX_SELECTED_FILES,
-    MAX_TOTAL_CHARS,
-    collect_file_evidence,
-    select_evidence_candidates,
+    MAX_TOTAL_PROMPT_CHARS,
 )
+from app.services.file_content_service import collect_file_evidence, select_evidence_candidates
 from app.services.file_ranker import RankedRepoFile
 from app.services.github_service import GitHubFileContentError, GitHubTextFileContent
 
@@ -132,7 +131,7 @@ class FileContentServiceTests(unittest.TestCase):
         # Each fetched file fills most of the per-file cap; together they exceed
         # the total cap so later files are trimmed then skipped.
         per_file = MAX_CHARS_PER_FILE
-        file_count = (MAX_TOTAL_CHARS // per_file) + 2
+        file_count = (MAX_TOTAL_PROMPT_CHARS // per_file) + 2
         ranked_files = [
             make_ranked_file(f"src/module_{index}.py") for index in range(file_count)
         ]
@@ -143,7 +142,7 @@ class FileContentServiceTests(unittest.TestCase):
         )
 
         total = sum(file.char_count for file in evidence.selected_files)
-        self.assertLessEqual(total, MAX_TOTAL_CHARS)
+        self.assertLessEqual(total, MAX_TOTAL_PROMPT_CHARS)
         self.assertEqual(evidence.total_characters, total)
         self.assertTrue(
             any(
