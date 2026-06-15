@@ -272,7 +272,7 @@ Backend endpoint: POST /api/generate/profile
 ## Codex Prompt
 
 ```text
-Add OpenAI-based project profile generation in the FastAPI backend. Create a service that combines repo metadata, detected tech stack, selected file evidence, and user context into a structured prompt. The model should return a validated JSON project profile with projectName, oneSentenceSummary, problem, solution, detectedTechStack, coreFeatures, technicalHighlights, userContribution, technicalChallenges, resumeAngles, and evidence.
+Add OpenAI-based project profile generation in the FastAPI backend. Create a service that combines repo metadata, detected tech stack, selected file evidence, and user context into a structured prompt. The model should return a validated JSON project profile with projectName, twoSentenceSummary, problem, solution, detectedTechStack, coreFeatures, technicalHighlights, userContribution, technicalChallenges, resumeAngles, and evidence.
 
 Use environment variables for the OpenAI API key. Do not expose secrets to the frontend. Respect the token/input limits created earlier. The output should be grounded in the selected repo evidence and user-provided context.
 
