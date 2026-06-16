@@ -43,6 +43,7 @@ backend/
     schemas/
     services/
       token_estimator.py  ← Phase 8: prompt budget check and token estimation
+      profile_generator.py  ← Phase 10: prompt construction + OpenAI profile generation
   requirements.txt
 ```
 
@@ -91,7 +92,7 @@ cd backend
 
 ## Current Scope
 
-Phases 1 through 9 are implemented. The app has a landing page with a GitHub repository URL input, loading and error states, and an analysis page driven by a FastAPI backend. The backend currently exposes:
+Phases 1 through 10 are implemented. The app has a landing page with a GitHub repository URL input, loading and error states, and an analysis page driven by a FastAPI backend. The backend currently exposes:
 
 - `GET /health` — service health check.
 - `POST /api/repo/parse` — normalize a GitHub URL into owner/repo.
@@ -100,6 +101,7 @@ Phases 1 through 9 are implemented. The app has a landing page with a GitHub rep
 - `POST /api/repo/ranked-files` — deterministic filtering and ranking of important files.
 - `POST /api/repo/tech-stack` — detect technologies with evidence and confidence.
 - `POST /api/repo/file-contents` — fetch bounded README, config, and top source file excerpts.
+- `POST /api/generate/profile` — generate a structured, evidence-backed project profile via OpenAI.
 - `GET /api/github/rate-limit` — report the current GitHub REST API budget.
 
 Phase 7 file-content fetching is intentionally bounded: it selects README, dependency/config manifests, and the top-ranked source files, then enforces a maximum number of files, a per-file character limit, and a total character limit across all excerpts. Files that are missing, oversized, non-text, or beyond the limits are returned as skipped with a clear reason, so the evidence stays small and auditable.
@@ -112,6 +114,10 @@ Phase 8 added token, cost, and abuse protection in preparation for OpenAI integr
 - Per-session, per-IP, and global daily analysis caps are defined in config with placeholder comments marking where Phase 16 rate-limiting middleware should be wired in.
 - An optional `ACCESS_PASSWORD` gate is available in config for early controlled deployments.
 
-Phase 9 added a user context questionnaire on the analysis page. It collects the project facts the repository cannot reveal — purpose, solo/team status, the user's own contribution, target user or client, hardest technical part, and optional measurable impact. Answers are held in frontend state only (no backend or database persistence yet): the form saves to a read-only summary and can be re-opened for editing. This context will ground later generation phases so RepoFrame does not guess intent, ownership, or impact.
+Phase 9 added a user context questionnaire on the analysis page. It collects the project facts the repository cannot reveal — purpose, solo/team status, the user's own contribution, target user or client, hardest technical part, and optional measurable impact. Answers are held in frontend state only (no backend or database persistence yet): the form saves to a read-only summary and can be re-opened for editing. This context grounds the generation phase so RepoFrame does not guess intent, ownership, or impact.
 
-OpenAI generation, database persistence, and authentication are planned but not implemented yet.
+Phase 10 added OpenAI-based project profile generation (backend only). `POST /api/generate/profile` accepts a repo URL and the user-context answers, re-runs the deterministic pipeline (metadata, tree, ranking, tech-stack, bounded file evidence), and asks OpenAI for a validated JSON profile: project name, two-sentence summary, problem, solution, detected tech stack, core features, technical highlights, user contribution, technical challenges, resume angles, and an evidence array linking claims to sources. Cost is bounded on both sides: input is capped by `MAX_TOTAL_PROMPT_CHARS` (enforced by `check_prompt_budget()` before any call) and output by `OPENAI_MAX_OUTPUT_TOKENS`. The model is set by `OPENAI_MODEL` (default `gpt-5.4-mini`, a reasoning model). The generator detects reasoning models and adjusts the request automatically: it omits `temperature` (which those models reject) and instead sends `OPENAI_REASONING_EFFORT` (default `medium`), while non-reasoning models such as `gpt-4o-mini` use `OPENAI_TEMPERATURE`. Because reasoning tokens share the output budget, `OPENAI_MAX_OUTPUT_TOKENS` defaults to 6000 to avoid truncating the JSON answer. Note that `gpt-5.4-mini` costs more per analysis than `gpt-4o-mini`; switch `OPENAI_MODEL` to `gpt-5.4-nano` or `gpt-4o-mini` for lower cost.
+
+The OpenAI client is reused across requests (connection pooling) and built with an explicit `OPENAI_TIMEOUT_SECONDS` (default 60, versus the SDK's 10-minute default) and `OPENAI_MAX_RETRIES` (default 2, using the SDK's exponential backoff). Transport and API errors map to specific HTTP statuses (timeout → 504, rate limit → 429, auth → 500, connection → 503), a response truncated at the token limit returns a clear actionable error, and raw error detail is logged server-side rather than returned to the client. The OpenAI call lives behind an injectable completion function so the unit tests run fully offline with zero token usage. Install dependencies with `pip install -r requirements.txt` to pull in the `openai` package before using this endpoint.
+
+Database persistence and authentication are planned but not implemented yet.

@@ -33,6 +33,43 @@ MAX_FILE_SIZE_BYTES: int = int(os.getenv("MAX_FILE_SIZE_BYTES", "100000"))
 
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 
+# Model and output bounds for profile generation (Phase 10). These directly
+# control cost: OPENAI_MODEL picks the price tier, OPENAI_MAX_OUTPUT_TOKENS caps
+# completion length (output tokens are the more expensive side), and
+# OPENAI_TEMPERATURE keeps generation grounded rather than creative. Input size
+# is capped separately by MAX_TOTAL_PROMPT_CHARS via check_prompt_budget().
+#
+# Default model. gpt-5.4-mini is a current-generation reasoning model: it does
+# NOT accept `temperature` (the generator omits it automatically and uses
+# `reasoning_effort` instead), and its reasoning tokens are billed as — and share
+# the budget with — the output tokens. That makes it meaningfully pricier than
+# gpt-4o-mini; override OPENAI_MODEL to change tiers (e.g. gpt-5.4-nano for less
+# cost, or gpt-4o-mini to return to the prior default).
+OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+
+# Output budget. On reasoning models, reasoning tokens consume this same budget,
+# so it must comfortably fit both the reasoning and the JSON answer; medium/high
+# reasoning effort uses more, hence the generous default. Too low a cap truncates
+# the answer (handled as a clear error, but better avoided).
+OPENAI_MAX_OUTPUT_TOKENS: int = int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "6000"))
+
+# Applied only to reasoning models (minimal | low | medium | high). "medium"
+# trades a little more reasoning-token spend and latency for better grounding
+# and synthesis on the profile task; raise to "high" for maximum quality. Ignored
+# for non-reasoning models, which use OPENAI_TEMPERATURE instead.
+OPENAI_REASONING_EFFORT: str = os.getenv("OPENAI_REASONING_EFFORT", "medium")
+
+# Used only for non-reasoning models (e.g. gpt-4o-mini). Lower = more grounded.
+OPENAI_TEMPERATURE: float = float(os.getenv("OPENAI_TEMPERATURE", "0.3"))
+
+# Network reliability bounds for the OpenAI client. The SDK default timeout is
+# 600 seconds (10 minutes) — far too long for a user-facing request, so a hung
+# connection would otherwise block the response for minutes. max_retries uses the
+# SDK's built-in exponential backoff to absorb transient 429/5xx/connection
+# errors. Both are env-tunable so deployments can adjust without code changes.
+OPENAI_TIMEOUT_SECONDS: float = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
+OPENAI_MAX_RETRIES: int = int(os.getenv("OPENAI_MAX_RETRIES", "2"))
+
 
 # ============================================================
 # Per-Session and Per-IP Request Caps (placeholder)
