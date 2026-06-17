@@ -23,6 +23,10 @@ class GenerateOutputsRequest(BaseModel):
 
     profile: ProjectProfile
     sections: list[OutputSection] | None = None
+    # Optional preemptive instruction folded into the generation prompt so the
+    # user can steer the first result (e.g. "keep it concise") instead of having
+    # to regenerate. Length-capped to keep prompts small and bound the output.
+    guidance: str = Field(default="", max_length=400)
 
 
 # The generated core outputs. Every field is optional because a scoped regenerate
@@ -47,6 +51,21 @@ class GenerateOutputsResponse(BaseModel):
     estimated_input_tokens: int = Field(alias="estimatedInputTokens")
 
 
+# Request to revise a single existing output section using user feedback: the
+# current (possibly edited) draft plus an optional free-text instruction. This
+# powers the feedback-driven "Regenerate", as opposed to a from-scratch generate.
+# The instruction is length-capped to keep prompts small and prevent a user from
+# steering the model into a much larger or off-format output. currentText is
+# bounded too, well above any real section, as a backstop against abuse.
+class ReviseOutputRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    profile: ProjectProfile
+    section: OutputSection
+    current_text: str = Field(alias="currentText", max_length=16000)
+    instruction: str = Field(default="", max_length=400)
+
+
 # One interview talking point: a likely question and concise points to make. Kept
 # auditable and grounded in the profile rather than generic interview advice.
 class InterviewTopic(BaseModel):
@@ -69,6 +88,8 @@ class GenerateInterviewPrepRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     profile: ProjectProfile
+    # Optional preemptive instruction, same role as on GenerateOutputsRequest.
+    guidance: str = Field(default="", max_length=400)
 
 
 # Interview-prep endpoint response: the topics plus the same cost-transparency

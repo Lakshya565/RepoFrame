@@ -105,6 +105,20 @@ export function hasAnyUserContext(context: UserContext): boolean {
   return Object.values(context).some((value) => value.trim() !== "");
 }
 
+// Returns true when two questionnaire snapshots hold identical answers. Used to
+// decide whether a cached project profile is still valid or must be regenerated
+// because the user changed their context (which grounds every generated output).
+export function userContextEquals(a: UserContext, b: UserContext): boolean {
+  return (
+    a.purpose === b.purpose &&
+    a.collaboration === b.collaboration &&
+    a.contribution === b.contribution &&
+    a.targetUser === b.targetUser &&
+    a.hardestPart === b.hardestPart &&
+    a.impact === b.impact
+  );
+}
+
 // Maps a collaboration value to its display label, falling back to a clear
 // "Not provided" string so the summary never renders a raw enum value.
 export function getCollaborationLabel(value: CollaborationMode | ""): string {

@@ -1,115 +1,132 @@
 "use client";
 
 import { useState } from "react";
-import { type GeneratedOutputs, type OutputSection } from "@/lib/repo-api";
+import {
+  INSTRUCTION_MAX_LENGTH,
+  applyEdit,
+  sectionHasContent,
+  sectionToText,
+} from "@/lib/outputs";
+import {
+  type GeneratedOutputs,
+  type InterviewTopic,
+  type OutputSection,
+} from "@/lib/repo-api";
+
+// A tab is one of the four output sections or the interview-prep tab.
+type CardTab = OutputSection | "interview";
+
+const CARD_TABS: { tab: CardTab; label: string }[] = [
+  { tab: "resumeBullets", label: "Resume bullets" },
+  { tab: "readmeIntro", label: "README intro" },
+  { tab: "portfolioBlurb", label: "Portfolio blurb" },
+  { tab: "linkedinDescription", label: "LinkedIn" },
+  { tab: "interview", label: "Interview prep" },
+];
 
 type GeneratedOutputsCardProps = {
   outputs: GeneratedOutputs;
+  interviewTopics: InterviewTopic[] | null;
+  baselines: Partial<Record<OutputSection, string>>;
+  // True while any generation runs anywhere — disables every trigger so calls
+  // cannot stack up.
+  busy: boolean;
+  generatingSection: OutputSection | null;
+  revisingSection: OutputSection | null;
+  generatingInterview: boolean;
   onOutputsChange: (next: GeneratedOutputs) => void;
-  onRegenerate: (section: OutputSection) => void;
-  regeneratingSection: OutputSection | null;
+  // Generate one section from the profile, with optional preemptive guidance.
+  onGenerateSection: (
+    section: OutputSection,
+    guidance: string,
+  ) => Promise<void> | void;
+  // Revise one section using the current draft plus the instruction as feedback.
+  onReviseSection: (section: OutputSection, instruction: string) => Promise<boolean>;
+  // Generate interview prep, with optional preemptive guidance.
+  onGenerateInterview: (guidance: string) => Promise<void> | void;
 };
 
-const TABS: { section: OutputSection; label: string }[] = [
-  { section: "resumeBullets", label: "Resume bullets" },
-  { section: "readmeIntro", label: "README intro" },
-  { section: "portfolioBlurb", label: "Portfolio blurb" },
-  { section: "linkedinDescription", label: "LinkedIn" },
-];
-
-// Reads one section as editable/copyable text. Resume bullets are joined one per
-// line so the whole list can be edited in a single textarea.
-function sectionToText(outputs: GeneratedOutputs, section: OutputSection): string {
-  switch (section) {
-    case "resumeBullets":
-      return (outputs.resumeBullets ?? []).join("\n");
-    case "readmeIntro":
-      return outputs.readmeIntro ?? "";
-    case "portfolioBlurb":
-      return outputs.portfolioBlurb ?? "";
-    case "linkedinDescription":
-      return outputs.linkedinDescription ?? "";
-  }
+// Formats interview topics into copyable plain text.
+function interviewToText(topics: InterviewTopic[]): string {
+  return topics
+    .map((topic) => {
+      const points = topic.talkingPoints.map((point) => `- ${point}`).join("\n");
+      return `${topic.question}\n${points}`;
+    })
+    .join("\n\n");
 }
 
-// Writes an edited section back into the outputs, splitting resume bullets back
-// into a list (one non-empty line each). Literal keys keep this type-safe.
-function applyEdit(
-  outputs: GeneratedOutputs,
-  section: OutputSection,
-  text: string,
-): GeneratedOutputs {
-  switch (section) {
-    case "resumeBullets":
-      return {
-        ...outputs,
-        resumeBullets: text
-          .split("\n")
-          .map((line) => line.trim())
-          .filter((line) => line !== ""),
-      };
-    case "readmeIntro":
-      return { ...outputs, readmeIntro: text };
-    case "portfolioBlurb":
-      return { ...outputs, portfolioBlurb: text };
-    case "linkedinDescription":
-      return { ...outputs, linkedinDescription: text };
-  }
-}
-
-// Displays the generated outputs in tabs, each with copy, inline edit, and a
-// scoped regenerate. Edits flow up so the parent keeps a single source of truth;
-// copy and regenerate both operate on the current (possibly edited) text.
+// The tabbed outputs panel. Each output tab supports per-tab generate, inline
+// edit, copy, and feedback-driven regenerate; the interview tab has its own
+// generate and copy. A single instruction box per tab feeds both generate (as
+// guidance) and regenerate (as feedback), so one field covers "one-shot it with
+// specs" and "fix what came back". Everything is disabled while a call runs.
 export function GeneratedOutputsCard({
   outputs,
+  interviewTopics,
+  baselines,
+  busy,
+  generatingSection,
+  revisingSection,
+  generatingInterview,
   onOutputsChange,
-  onRegenerate,
-  regeneratingSection,
+  onGenerateSection,
+  onReviseSection,
+  onGenerateInterview,
 }: GeneratedOutputsCardProps) {
-  const [activeSection, setActiveSection] =
-    useState<OutputSection>("resumeBullets");
+  const [activeTab, setActiveTab] = useState<CardTab>("resumeBullets");
   const [isEditing, setIsEditing] = useState(false);
-  const [copied, setCopied] = useState(false);
-  // While editing, the textarea is driven by this raw draft string rather than a
-  // value derived from the stored outputs. This is what lets resume bullets gain
-  // new lines: the stored form filters out empty bullets, so binding the textarea
-  // straight to it would erase a freshly typed (still-empty) line on every
-  // keystroke. The draft holds exactly what the user types; it is parsed into the
-  // stored shape on each change and discarded when editing ends.
+  // While editing, the textarea is driven by this raw draft so resume bullets can
+  // gain new lines (the stored form filters empty bullets).
   const [draft, setDraft] = useState("");
+  const [copied, setCopied] = useState(false);
+  // One instruction box per tab, preserved across tab switches.
+  const [instructions, setInstructions] = useState<Record<CardTab, string>>({
+    resumeBullets: "",
+    readmeIntro: "",
+    portfolioBlurb: "",
+    linkedinDescription: "",
+    interview: "",
+  });
 
-  const isRegenerating = regeneratingSection === activeSection;
-  const copyText = isEditing ? draft : sectionToText(outputs, activeSection);
+  const instruction = instructions[activeTab];
 
-  // Switches tabs, leaving edit mode so each section opens read-only.
-  function selectSection(section: OutputSection) {
-    setActiveSection(section);
+  function setInstruction(value: string) {
+    setInstructions((current) => ({ ...current, [activeTab]: value }));
+  }
+
+  // Switches tabs, leaving edit mode so each tab opens read-only.
+  function selectTab(tab: CardTab) {
+    setActiveTab(tab);
     setIsEditing(false);
     setCopied(false);
   }
 
-  // Enters edit mode, seeding the draft from the current section text. Leaving
-  // edit mode just drops the draft; edits are already pushed up on each change.
+  // Enters/leaves edit mode for an output tab, seeding the draft on entry.
   function toggleEditing() {
+    if (activeTab === "interview") {
+      return;
+    }
     if (isEditing) {
       setIsEditing(false);
       return;
     }
-    setDraft(sectionToText(outputs, activeSection));
+    setDraft(sectionToText(outputs, activeTab));
     setIsEditing(true);
   }
 
-  // Updates the local draft and pushes the parsed value up so the parent stays
-  // the single source of truth (and copy/regenerate see the latest edits).
+  // Pushes an edit up so the parent stays the single source of truth.
   function handleDraftChange(value: string) {
+    if (activeTab === "interview") {
+      return;
+    }
     setDraft(value);
-    onOutputsChange(applyEdit(outputs, activeSection, value));
+    onOutputsChange(applyEdit(outputs, activeTab, value));
   }
 
-  // Copies the current section text to the clipboard with brief feedback.
-  async function handleCopy() {
+  async function handleCopy(text: string) {
     try {
-      await navigator.clipboard.writeText(copyText);
+      await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -117,53 +134,98 @@ export function GeneratedOutputsCard({
     }
   }
 
-  return (
-    <div className="rounded-md border border-slate-200 bg-white">
-      <div className="flex flex-wrap gap-2 border-b border-slate-200 p-3">
-        {TABS.map((tab) => {
-          const isActive = tab.section === activeSection;
-          return (
-            <button
-              className={`rounded-md px-3 py-2 text-sm font-semibold transition ${
-                isActive
-                  ? "bg-slate-950 text-white"
-                  : "text-slate-600 hover:bg-slate-100"
-              }`}
-              key={tab.section}
-              onClick={() => selectSection(tab.section)}
-              type="button"
-            >
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
+  // Generates a section on its own (instruction acts as preemptive guidance).
+  async function handleGenerateSection(section: OutputSection) {
+    await onGenerateSection(section, instruction.trim());
+    setIsEditing(false);
+  }
 
-      <div className="p-4">
+  // Regenerates a section with feedback (current draft + instruction).
+  async function handleRevise(section: OutputSection) {
+    const ok = await onReviseSection(section, instruction.trim());
+    if (ok) {
+      setIsEditing(false);
+    }
+  }
+
+  // The shared instruction box, rendered on every tab with a tab-appropriate hint.
+  function renderInstructionBox(helper: string) {
+    return (
+      <div className="mt-5 border-t border-slate-200 pt-4">
+        <label
+          className="text-sm font-medium text-slate-900"
+          htmlFor={`instructions-${activeTab}`}
+        >
+          Instructions for the model (optional)
+        </label>
+        <p className="mt-1 text-sm text-slate-500">{helper}</p>
+        <textarea
+          className="mt-2 min-h-16 w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm leading-6 text-slate-950 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-50"
+          disabled={busy}
+          id={`instructions-${activeTab}`}
+          maxLength={INSTRUCTION_MAX_LENGTH}
+          onChange={(event) => setInstruction(event.target.value)}
+          placeholder="e.g. keep it concise, lead with measurable impact"
+          value={instruction}
+        />
+        <div className="mt-1 text-right text-xs text-slate-400">
+          {instruction.length}/{INSTRUCTION_MAX_LENGTH}
+        </div>
+      </div>
+    );
+  }
+
+  function renderOutputPanel(section: OutputSection) {
+    const sectionText = sectionToText(outputs, section);
+    const hasContent = sectionHasContent(outputs, section);
+    const baseline = baselines[section];
+    const isEdited = baseline !== undefined && sectionText !== baseline;
+    const canRevise =
+      hasContent && !busy && (isEdited || instruction.trim() !== "");
+    const isGeneratingThis = generatingSection === section;
+    const isRevisingThis = revisingSection === section;
+    const currentCopyText = isEditing ? draft : sectionText;
+
+    return (
+      <>
         <div className="flex flex-wrap gap-2">
           <button
-            className="min-h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900"
-            onClick={handleCopy}
+            className="min-h-10 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={busy}
+            onClick={() => handleGenerateSection(section)}
+            type="button"
+          >
+            {isGeneratingThis
+              ? "Generating…"
+              : hasContent
+                ? "Generate again"
+                : "Generate"}
+          </button>
+          <button
+            className="min-h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={!hasContent}
+            onClick={() => handleCopy(currentCopyText)}
             type="button"
           >
             {copied ? "Copied" : "Copy"}
           </button>
           <button
-            className="min-h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900"
+            className="min-h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={busy || !hasContent}
             onClick={toggleEditing}
             type="button"
           >
             {isEditing ? "Done editing" : "Edit"}
           </button>
-          <button
-            className="min-h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={regeneratingSection !== null}
-            onClick={() => onRegenerate(activeSection)}
-            type="button"
-          >
-            {isRegenerating ? "Regenerating…" : "Regenerate"}
-          </button>
         </div>
+
+        {hasContent ? (
+          <p className="mt-2 text-xs text-slate-500">
+            <strong className="font-semibold">Generate again</strong> rewrites
+            this tab from the profile and ignores your edits. To keep your edits,
+            use <strong className="font-semibold">Regenerate</strong> below.
+          </p>
+        ) : null}
 
         <div className="mt-4">
           {isEditing ? (
@@ -173,9 +235,120 @@ export function GeneratedOutputsCard({
               value={draft}
             />
           ) : (
-            <OutputPreview outputs={outputs} section={activeSection} />
+            <OutputPreview outputs={outputs} section={section} />
           )}
         </div>
+
+        {renderInstructionBox(
+          "Added to the prompt when you Generate, and used as feedback when you Regenerate.",
+        )}
+
+        <div className="mt-2">
+          <button
+            className="min-h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={!canRevise}
+            onClick={() => handleRevise(section)}
+            type="button"
+          >
+            {isRevisingThis ? "Regenerating…" : "Regenerate"}
+          </button>
+        </div>
+      </>
+    );
+  }
+
+  function renderInterviewPanel() {
+    const hasTopics = interviewTopics !== null;
+    const topics = interviewTopics ?? [];
+
+    return (
+      <>
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="min-h-10 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={busy}
+            onClick={() => onGenerateInterview(instruction.trim())}
+            type="button"
+          >
+            {generatingInterview
+              ? "Generating…"
+              : hasTopics
+                ? "Generate again"
+                : "Generate"}
+          </button>
+          <button
+            className="min-h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={topics.length === 0}
+            onClick={() => handleCopy(interviewToText(topics))}
+            type="button"
+          >
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+
+        <div className="mt-4">
+          {hasTopics ? (
+            topics.length > 0 ? (
+              <div className="space-y-4">
+                {topics.map((topic, index) => (
+                  <div
+                    className="rounded-md border border-slate-200 bg-slate-50 p-4"
+                    key={index}
+                  >
+                    <p className="text-base font-semibold text-slate-950">
+                      {topic.question}
+                    </p>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-slate-700">
+                      {topic.talkingPoints.map((point, pointIndex) => (
+                        <li key={pointIndex}>{point}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">
+                No interview topics were returned.
+              </p>
+            )
+          ) : (
+            <EmptyOutput />
+          )}
+        </div>
+
+        {renderInstructionBox(
+          "Added to the prompt when you generate interview prep.",
+        )}
+      </>
+    );
+  }
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-white">
+      <div className="flex flex-wrap gap-2 border-b border-slate-200 p-3">
+        {CARD_TABS.map((item) => {
+          const isActive = item.tab === activeTab;
+          return (
+            <button
+              className={`rounded-md px-3 py-2 text-sm font-semibold transition ${
+                isActive
+                  ? "bg-slate-950 text-white"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+              key={item.tab}
+              onClick={() => selectTab(item.tab)}
+              type="button"
+            >
+              {item.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="p-4">
+        {activeTab === "interview"
+          ? renderInterviewPanel()
+          : renderOutputPanel(activeTab)}
       </div>
     </div>
   );
@@ -186,8 +359,8 @@ type OutputPreviewProps = {
   section: OutputSection;
 };
 
-// Renders a section read-only: resume bullets as a list, everything else as
-// preformatted text. Missing sections show a hint to use Regenerate.
+// Renders an output section read-only: resume bullets as a list, others as
+// preformatted text. Ungenerated sections show a hint.
 function OutputPreview({ outputs, section }: OutputPreviewProps) {
   if (section === "resumeBullets") {
     const bullets = outputs.resumeBullets ?? [];
@@ -214,12 +387,11 @@ function OutputPreview({ outputs, section }: OutputPreviewProps) {
   );
 }
 
-// Placeholder shown when a section has not been generated yet (e.g. after a
-// scoped regenerate of a different section).
+// Placeholder shown when a tab has not been generated yet.
 function EmptyOutput() {
   return (
     <p className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-      This section has not been generated yet. Use Regenerate to create it.
+      Nothing generated yet. Use Generate to create it.
     </p>
   );
 }

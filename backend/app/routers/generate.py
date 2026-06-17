@@ -6,6 +6,7 @@ from app.schemas.outputs import (
     GenerateInterviewPrepResponse,
     GenerateOutputsRequest,
     GenerateOutputsResponse,
+    ReviseOutputRequest,
 )
 from app.schemas.profile import (
     GenerateProfileRequest,
@@ -27,6 +28,7 @@ from app.services.llm_client import LLMError
 from app.services.output_generator import (
     generate_core_outputs,
     generate_interview_prep,
+    revise_output,
 )
 from app.services.profile_generator import (
     ProfileGenerationError,
@@ -147,7 +149,30 @@ def generate_profile(request: GenerateProfileRequest) -> GenerateProfileResponse
 def generate_outputs(request: GenerateOutputsRequest) -> GenerateOutputsResponse:
     try:
         outputs, estimated_input_tokens = generate_core_outputs(
-            request.profile, request.sections
+            request.profile, request.sections, request.guidance
+        )
+    except LLMError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    return GenerateOutputsResponse(
+        outputs=outputs,
+        model=OPENAI_MODEL,
+        estimated_input_tokens=estimated_input_tokens,
+    )
+
+
+# Revises a single output section using the user's current draft plus an optional
+# instruction (the feedback-driven "Regenerate"). Returns the same shape as the
+# generate endpoint with only the revised section populated, so the frontend can
+# merge it without disturbing the other outputs.
+@router.post("/outputs/revise", response_model=GenerateOutputsResponse)
+def revise_output_endpoint(request: ReviseOutputRequest) -> GenerateOutputsResponse:
+    try:
+        outputs, estimated_input_tokens = revise_output(
+            request.profile,
+            request.section,
+            request.current_text,
+            request.instruction,
         )
     except LLMError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
@@ -167,7 +192,9 @@ def generate_interview_prep_endpoint(
     request: GenerateInterviewPrepRequest,
 ) -> GenerateInterviewPrepResponse:
     try:
-        topics, estimated_input_tokens = generate_interview_prep(request.profile)
+        topics, estimated_input_tokens = generate_interview_prep(
+            request.profile, request.guidance
+        )
     except LLMError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 

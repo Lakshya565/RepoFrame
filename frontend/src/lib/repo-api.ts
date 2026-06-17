@@ -233,10 +233,11 @@ export async function generateProfile(
 export async function generateOutputs(
   profile: ProjectProfileData,
   sections?: OutputSection[],
+  guidance?: string,
 ): Promise<GenerateOutputsResponse> {
   return postJson(
     "/api/generate/outputs",
-    { profile, sections },
+    { profile, sections, guidance },
     "RepoFrame could not generate outputs.",
   );
 }
@@ -245,11 +246,28 @@ export async function generateOutputs(
 // the user explicitly opts in, so it never spends tokens in the default flow.
 export async function generateInterviewPrep(
   profile: ProjectProfileData,
+  guidance?: string,
 ): Promise<GenerateInterviewPrepResponse> {
   return postJson(
     "/api/generate/interview-prep",
-    { profile },
+    { profile, guidance },
     "RepoFrame could not generate interview prep.",
+  );
+}
+
+// Revises one existing section from the user's current draft plus an optional
+// instruction (feedback-driven regenerate). Returns the same shape as
+// generateOutputs with only the revised section populated.
+export async function reviseOutput(
+  profile: ProjectProfileData,
+  section: OutputSection,
+  currentText: string,
+  instruction: string,
+): Promise<GenerateOutputsResponse> {
+  return postJson(
+    "/api/generate/outputs/revise",
+    { profile, section, currentText, instruction },
+    "RepoFrame could not regenerate that section.",
   );
 }
 

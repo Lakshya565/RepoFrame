@@ -7,6 +7,7 @@ from app.services.output_generator import (
     ALL_SECTIONS,
     generate_core_outputs,
     generate_interview_prep,
+    revise_output,
 )
 
 
@@ -116,6 +117,81 @@ class OutputGeneratorTests(unittest.TestCase):
         with self.assertRaises(LLMError) as ctx:
             generate_interview_prep(
                 make_profile(), completion_fn=fake_completion("not json")
+            )
+        self.assertEqual(ctx.exception.status_code, 502)
+
+    def test_revise_returns_only_the_revised_section(self) -> None:
+        # The model returns the one revised section; revise_output keeps only it
+        # so the caller can merge without disturbing the other outputs.
+        content = json.dumps({"portfolioBlurb": "A tighter, less fluffy blurb."})
+
+        outputs, tokens = revise_output(
+            make_profile(),
+            "portfolioBlurb",
+            current_text="An old, fluffy blurb.",
+            instruction="less fluff",
+            completion_fn=fake_completion(content),
+        )
+
+        self.assertEqual(outputs.portfolio_blurb, "A tighter, less fluffy blurb.")
+        self.assertIsNone(outputs.resume_bullets)
+        self.assertIsNone(outputs.readme_intro)
+        self.assertGreater(tokens, 0)
+
+    def test_revise_works_without_an_instruction(self) -> None:
+        # With no instruction, revision is driven purely by the current draft.
+        content = json.dumps({"resumeBullets": ["Tightened bullet one"]})
+
+        outputs, _ = revise_output(
+            make_profile(),
+            "resumeBullets",
+            current_text="Wordy bullet one",
+            instruction="",
+            completion_fn=fake_completion(content),
+        )
+
+        self.assertEqual(outputs.resume_bullets, ["Tightened bullet one"])
+
+    def test_guidance_is_included_in_the_generation_prompt(self) -> None:
+        # The preemptive guidance must reach the model's prompt so it can steer
+        # the first result without a follow-up regenerate.
+        captured: dict[str, str] = {}
+
+        def capturing(system: str, user: str) -> CompletionResult:
+            captured["user"] = user
+            return CompletionResult(content=all_outputs_json())
+
+        generate_core_outputs(
+            make_profile(),
+            ["resumeBullets"],
+            guidance="keep them very concise",
+            completion_fn=capturing,
+        )
+
+        self.assertIn("keep them very concise", captured["user"])
+        self.assertIn("ADDITIONAL INSTRUCTIONS", captured["user"])
+
+    def test_empty_guidance_adds_no_instructions_block(self) -> None:
+        captured: dict[str, str] = {}
+
+        def capturing(system: str, user: str) -> CompletionResult:
+            captured["user"] = user
+            return CompletionResult(content=all_outputs_json())
+
+        generate_core_outputs(
+            make_profile(), ["resumeBullets"], guidance="", completion_fn=capturing
+        )
+
+        self.assertNotIn("ADDITIONAL INSTRUCTIONS", captured["user"])
+
+    def test_revise_malformed_json_raises_502(self) -> None:
+        with self.assertRaises(LLMError) as ctx:
+            revise_output(
+                make_profile(),
+                "readmeIntro",
+                current_text="draft",
+                instruction="",
+                completion_fn=fake_completion("not json"),
             )
         self.assertEqual(ctx.exception.status_code, 502)
 
