@@ -2,9 +2,9 @@ import Link from "next/link";
 import { GitHubRateLimitCard } from "@/components/github-rate-limit-card";
 import { ImportantFilesCard } from "@/components/important-files-card";
 import { RepoSummaryCard } from "@/components/repo-summary-card";
+import { ProjectWriteupSection } from "@/components/project-writeup-section";
 import { RepoTreeView } from "@/components/repo-tree-view";
 import { TechStackCard } from "@/components/tech-stack-card";
-import { UserContextForm } from "@/components/user-context-form";
 
 type AnalysisPageProps = {
   searchParams: Promise<{
@@ -65,7 +65,7 @@ export default async function AnalysisPage({ searchParams }: AnalysisPageProps) 
           <TechStackCard repoUrl={normalizedUrl} />
           <ImportantFilesCard repoUrl={normalizedUrl} />
           <RepoTreeView repoUrl={normalizedUrl} />
-          <UserContextForm />
+          <ProjectWriteupSection repoUrl={normalizedUrl} />
           <GitHubRateLimitCard />
         </div>
       </section>

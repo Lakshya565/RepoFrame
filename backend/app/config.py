@@ -65,8 +65,9 @@ OPENAI_TEMPERATURE: float = float(os.getenv("OPENAI_TEMPERATURE", "0.3"))
 # Network reliability bounds for the OpenAI client. The SDK default timeout is
 # 600 seconds (10 minutes) — far too long for a user-facing request, so a hung
 # connection would otherwise block the response for minutes. max_retries uses the
-# SDK's built-in exponential backoff to absorb transient 429/5xx/connection
-# errors. Both are env-tunable so deployments can adjust without code changes.
+# SDK's built-in exponential backoff (honoring Retry-After) to absorb transient
+# 429/5xx/connection errors. Both are env-tunable so deployments can adjust
+# without code changes.
 OPENAI_TIMEOUT_SECONDS: float = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
 OPENAI_MAX_RETRIES: int = int(os.getenv("OPENAI_MAX_RETRIES", "2"))
 

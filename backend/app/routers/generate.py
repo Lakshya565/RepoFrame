@@ -1,6 +1,12 @@
 from fastapi import APIRouter, HTTPException
 
 from app.config import OPENAI_MODEL
+from app.schemas.outputs import (
+    GenerateInterviewPrepRequest,
+    GenerateInterviewPrepResponse,
+    GenerateOutputsRequest,
+    GenerateOutputsResponse,
+)
 from app.schemas.profile import (
     GenerateProfileRequest,
     GenerateProfileResponse,
@@ -16,6 +22,11 @@ from app.services.github_service import (
     fetch_repo_metadata,
     fetch_repo_text_file,
     fetch_repo_tree,
+)
+from app.services.llm_client import LLMError
+from app.services.output_generator import (
+    generate_core_outputs,
+    generate_interview_prep,
 )
 from app.services.profile_generator import (
     ProfileGenerationError,
@@ -124,4 +135,44 @@ def generate_profile(request: GenerateProfileRequest) -> GenerateProfileResponse
         model=OPENAI_MODEL,
         estimated_input_tokens=estimated_input_tokens,
         evidence_file_count=len(evidence.selected_files),
+    )
+
+
+# Generates the Phase 11 core written outputs (resume bullets, README intro,
+# portfolio blurb, LinkedIn description) from an already-generated project
+# profile. Accepting the profile in the request body avoids re-running the repo
+# pipeline and the profile-generation call. The optional sections list scopes a
+# regenerate to one section; all generation logic lives in output_generator.
+@router.post("/outputs", response_model=GenerateOutputsResponse)
+def generate_outputs(request: GenerateOutputsRequest) -> GenerateOutputsResponse:
+    try:
+        outputs, estimated_input_tokens = generate_core_outputs(
+            request.profile, request.sections
+        )
+    except LLMError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    return GenerateOutputsResponse(
+        outputs=outputs,
+        model=OPENAI_MODEL,
+        estimated_input_tokens=estimated_input_tokens,
+    )
+
+
+# Generates interview talking points from a project profile. Kept on its own
+# endpoint because interview prep is opt-in: the frontend only calls this when the
+# user explicitly asks, so it never spends tokens as part of the default flow.
+@router.post("/interview-prep", response_model=GenerateInterviewPrepResponse)
+def generate_interview_prep_endpoint(
+    request: GenerateInterviewPrepRequest,
+) -> GenerateInterviewPrepResponse:
+    try:
+        topics, estimated_input_tokens = generate_interview_prep(request.profile)
+    except LLMError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    return GenerateInterviewPrepResponse(
+        topics=topics,
+        model=OPENAI_MODEL,
+        estimated_input_tokens=estimated_input_tokens,
     )

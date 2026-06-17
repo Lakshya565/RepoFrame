@@ -12,34 +12,42 @@ import {
   type UserContextTextKey,
 } from "@/lib/user-context";
 
+type UserContextFormProps = {
+  context: UserContext;
+  onContextChange: (context: UserContext) => void;
+};
+
 // Collects the project context that the repository cannot reveal on its own.
-// Phase 9 keeps everything in local state: the user fills the form, saves it to
-// a read-only summary, and can re-open it to edit. Persistence and LLM use are
-// deliberately left to later phases.
-export function UserContextForm() {
-  const [context, setContext] = useState<UserContext>(EMPTY_USER_CONTEXT);
+// The answers are owned by the parent (lifted in Phase 11) so the writeup
+// generator can read them; this form renders the editable questionnaire and a
+// read-only saved summary, reporting edits up through onContextChange. Database
+// persistence is still left to a later phase.
+export function UserContextForm({
+  context,
+  onContextChange,
+}: UserContextFormProps) {
   // Tracks whether the user is editing the answers or viewing the saved summary.
   // The form opens in edit mode so the first interaction is filling it in.
   const [isEditing, setIsEditing] = useState(true);
 
   // Updates a single free-text field while leaving the rest of the answers
-  // untouched, keeping the form fully controlled.
+  // untouched. The parent owns the context, so updates flow up.
   function handleTextChange(key: UserContextTextKey, value: string) {
-    setContext((current) => ({ ...current, [key]: value }));
+    onContextChange({ ...context, [key]: value });
   }
 
   // Sets the solo/team choice. Selecting the active option again clears it so
   // the answer can be left blank if the user is unsure.
   function handleCollaborationChange(value: CollaborationMode) {
-    setContext((current) => ({
-      ...current,
-      collaboration: current.collaboration === value ? "" : value,
-    }));
+    onContextChange({
+      ...context,
+      collaboration: context.collaboration === value ? "" : value,
+    });
   }
 
   // Clears every answer back to the empty questionnaire.
   function handleReset() {
-    setContext(EMPTY_USER_CONTEXT);
+    onContextChange(EMPTY_USER_CONTEXT);
   }
 
   return (

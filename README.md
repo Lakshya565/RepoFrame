@@ -43,7 +43,9 @@ backend/
     schemas/
     services/
       token_estimator.py  ← Phase 8: prompt budget check and token estimation
+      llm_client.py         ← Phase 11: shared OpenAI client, budget/error handling
       profile_generator.py  ← Phase 10: prompt construction + OpenAI profile generation
+      output_generator.py   ← Phase 11: core output + interview-prep generation
   requirements.txt
 ```
 
@@ -92,7 +94,7 @@ cd backend
 
 ## Current Scope
 
-Phases 1 through 10 are implemented. The app has a landing page with a GitHub repository URL input, loading and error states, and an analysis page driven by a FastAPI backend. The backend currently exposes:
+Phases 1 through 11 are implemented. The app has a landing page with a GitHub repository URL input, loading and error states, and an analysis page driven by a FastAPI backend. The backend currently exposes:
 
 - `GET /health` — service health check.
 - `POST /api/repo/parse` — normalize a GitHub URL into owner/repo.
@@ -102,6 +104,8 @@ Phases 1 through 10 are implemented. The app has a landing page with a GitHub re
 - `POST /api/repo/tech-stack` — detect technologies with evidence and confidence.
 - `POST /api/repo/file-contents` — fetch bounded README, config, and top source file excerpts.
 - `POST /api/generate/profile` — generate a structured, evidence-backed project profile via OpenAI.
+- `POST /api/generate/outputs` — generate core written outputs (resume bullets, README intro, portfolio blurb, LinkedIn description) from a project profile; an optional `sections` list scopes a regenerate to one section.
+- `POST /api/generate/interview-prep` — generate interview talking points from a project profile (opt-in only).
 - `GET /api/github/rate-limit` — report the current GitHub REST API budget.
 
 Phase 7 file-content fetching is intentionally bounded: it selects README, dependency/config manifests, and the top-ranked source files, then enforces a maximum number of files, a per-file character limit, and a total character limit across all excerpts. Files that are missing, oversized, non-text, or beyond the limits are returned as skipped with a clear reason, so the evidence stays small and auditable.
@@ -119,5 +123,9 @@ Phase 9 added a user context questionnaire on the analysis page. It collects the
 Phase 10 added OpenAI-based project profile generation (backend only). `POST /api/generate/profile` accepts a repo URL and the user-context answers, re-runs the deterministic pipeline (metadata, tree, ranking, tech-stack, bounded file evidence), and asks OpenAI for a validated JSON profile: project name, two-sentence summary, problem, solution, detected tech stack, core features, technical highlights, user contribution, technical challenges, resume angles, and an evidence array linking claims to sources. Cost is bounded on both sides: input is capped by `MAX_TOTAL_PROMPT_CHARS` (enforced by `check_prompt_budget()` before any call) and output by `OPENAI_MAX_OUTPUT_TOKENS`. The model is set by `OPENAI_MODEL` (default `gpt-5.4-mini`, a reasoning model). The generator detects reasoning models and adjusts the request automatically: it omits `temperature` (which those models reject) and instead sends `OPENAI_REASONING_EFFORT` (default `medium`), while non-reasoning models such as `gpt-4o-mini` use `OPENAI_TEMPERATURE`. Because reasoning tokens share the output budget, `OPENAI_MAX_OUTPUT_TOKENS` defaults to 6000 to avoid truncating the JSON answer. Note that `gpt-5.4-mini` costs more per analysis than `gpt-4o-mini`; switch `OPENAI_MODEL` to `gpt-5.4-nano` or `gpt-4o-mini` for lower cost.
 
 The OpenAI client is reused across requests (connection pooling) and built with an explicit `OPENAI_TIMEOUT_SECONDS` (default 60, versus the SDK's 10-minute default) and `OPENAI_MAX_RETRIES` (default 2, using the SDK's exponential backoff). Transport and API errors map to specific HTTP statuses (timeout → 504, rate limit → 429, auth → 500, connection → 503), a response truncated at the token limit returns a clear actionable error, and raw error detail is logged server-side rather than returned to the client. The OpenAI call lives behind an injectable completion function so the unit tests run fully offline with zero token usage. Install dependencies with `pip install -r requirements.txt` to pull in the `openai` package before using this endpoint.
+
+Phase 11 (backend) adds generated outputs on top of a project profile. The shared OpenAI plumbing (client reuse, timeout/retries, reasoning-model handling, budget/truncation guards, error mapping) lives in `app/services/llm_client.py` and is used by every generator. `POST /api/generate/outputs` turns a project profile into resume bullets, a README intro, a portfolio blurb, and a LinkedIn-style description in one call; an optional `sections` list scopes a regenerate to a single section so it never overwrites the others. `POST /api/generate/interview-prep` generates interview talking points and is opt-in only — the frontend calls it solely when the user explicitly asks, so it never spends tokens in the default flow. Both endpoints take the profile in the request body to avoid re-running the repo pipeline or the profile-generation call.
+
+On the frontend, the analysis page's `ProjectWriteupSection` lifts the questionnaire answers and orchestrates generation. A single explicit "Generate writeup" button runs profile generation then core-output generation — nothing is generated automatically on page load, so the page never spends tokens without a deliberate action. Outputs render in tabs (resume bullets, README intro, portfolio blurb, LinkedIn description) with copy, inline edit, and per-section regenerate; an `EvidencePanel` shows the claim-to-source links from the profile, and an opt-in `InterviewPrepCard` button generates interview talking points only when clicked. This part of the UI is intentionally functional rather than polished — the visual overhaul comes in the Phase 14 polish pass.
 
 Database persistence and authentication are planned but not implemented yet.

@@ -1,3 +1,5 @@
+import type { UserContext } from "@/lib/user-context";
+
 export type ParsedRepoResponse = {
   owner: string;
   repo: string;
@@ -147,6 +149,127 @@ export async function fetchGitHubRateLimit(): Promise<GitHubRateLimitResponse> {
     response,
     "RepoFrame could not fetch GitHub rate limit status.",
   );
+}
+
+// ── Phase 11: generated outputs ──────────────────────────────────────────────
+// These mirror the backend generation schemas. The endpoints call OpenAI, so the
+// UI only ever invokes them in response to an explicit user action.
+
+export type ProfileEvidenceItem = {
+  claim: string;
+  source: string;
+};
+
+export type ProjectProfileData = {
+  projectName: string;
+  twoSentenceSummary: string;
+  problem: string;
+  solution: string;
+  detectedTechStack: string[];
+  coreFeatures: string[];
+  technicalHighlights: string[];
+  userContribution: string;
+  technicalChallenges: string[];
+  resumeAngles: string[];
+  evidence: ProfileEvidenceItem[];
+};
+
+export type GenerateProfileResponse = ParsedRepoResponse & {
+  defaultBranch: string;
+  profile: ProjectProfileData;
+  model: string;
+  estimatedInputTokens: number;
+  evidenceFileCount: number;
+};
+
+// The four core output sections. Used to scope a regenerate to one section.
+export type OutputSection =
+  | "resumeBullets"
+  | "readmeIntro"
+  | "portfolioBlurb"
+  | "linkedinDescription";
+
+export type GeneratedOutputs = {
+  resumeBullets: string[] | null;
+  readmeIntro: string | null;
+  portfolioBlurb: string | null;
+  linkedinDescription: string | null;
+};
+
+export type GenerateOutputsResponse = {
+  outputs: GeneratedOutputs;
+  model: string;
+  estimatedInputTokens: number;
+};
+
+export type InterviewTopic = {
+  question: string;
+  talkingPoints: string[];
+};
+
+export type GenerateInterviewPrepResponse = {
+  topics: InterviewTopic[];
+  model: string;
+  estimatedInputTokens: number;
+};
+
+// Generates the structured project profile from a repo URL plus the user's
+// questionnaire answers. This is the first paid OpenAI step and is only ever
+// triggered by an explicit user action in the UI.
+export async function generateProfile(
+  repoUrl: string,
+  userContext: UserContext,
+): Promise<GenerateProfileResponse> {
+  return postJson(
+    "/api/generate/profile",
+    { repoUrl, userContext },
+    "RepoFrame could not generate a project profile.",
+  );
+}
+
+// Generates the core written outputs from an existing profile. An optional
+// sections list scopes a regenerate to a single output so the others are not
+// regenerated (or paid for) again.
+export async function generateOutputs(
+  profile: ProjectProfileData,
+  sections?: OutputSection[],
+): Promise<GenerateOutputsResponse> {
+  return postJson(
+    "/api/generate/outputs",
+    { profile, sections },
+    "RepoFrame could not generate outputs.",
+  );
+}
+
+// Generates interview talking points from an existing profile. Called only when
+// the user explicitly opts in, so it never spends tokens in the default flow.
+export async function generateInterviewPrep(
+  profile: ProjectProfileData,
+): Promise<GenerateInterviewPrepResponse> {
+  return postJson(
+    "/api/generate/interview-prep",
+    { profile },
+    "RepoFrame could not generate interview prep.",
+  );
+}
+
+// Posts an arbitrary JSON body and returns typed JSON or a useful Error. The
+// generation endpoints take richer bodies than the shared { repoUrl } shape, so
+// they use this instead of postRepoRequest.
+async function postJson<T>(
+  path: string,
+  body: unknown,
+  fallbackMessage: string,
+): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  return parseResponse(response, fallbackMessage);
 }
 
 // Posts to repo-analysis endpoints that share the same { repoUrl } request
