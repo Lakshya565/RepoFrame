@@ -1,8 +1,13 @@
 import unittest
 
 from app.services.file_ranker import RankedRepoFile
-from app.services.github_service import GitHubRepoMetadata, GitHubTextFileContent
+from app.services.github_service import (
+    GitHubFileContentError,
+    GitHubRepoMetadata,
+    GitHubTextFileContent,
+)
 from app.services.tech_stack_detector import (
+    collect_stack_evidence,
     detect_tech_stack,
     select_stack_evidence_files,
 )
@@ -147,6 +152,55 @@ class TechStackDetectorTests(unittest.TestCase):
         )
 
         self.assertEqual(technologies, [])
+
+
+# Covers the shared evidence-fetching helper used by both routes that run stack
+# detection: it returns fetched files and tolerates the expected per-file gaps
+# without hitting the network (a fake fetcher is injected).
+class CollectStackEvidenceTests(unittest.TestCase):
+    def test_returns_only_fetchable_readme_and_manifest_files(self) -> None:
+        ranked_files = [
+            make_ranked_file("README.md"),
+            make_ranked_file("package.json"),
+            make_ranked_file("src/app/page.tsx"),
+        ]
+
+        # Records the calls so we can confirm only stack-evidence files are fetched.
+        fetched_paths: list[str] = []
+
+        def fake_fetcher(owner, repo, path, ref, max_size_bytes):
+            fetched_paths.append(path)
+            return make_content(path, "content")
+
+        evidence = collect_stack_evidence(
+            "acme", "example", "main", ranked_files, fetcher=fake_fetcher
+        )
+
+        self.assertEqual(fetched_paths, ["README.md", "package.json"])
+        self.assertEqual([file.path for file in evidence], ["README.md", "package.json"])
+
+    def test_skips_tolerated_file_errors_but_reraises_others(self) -> None:
+        ranked_files = [make_ranked_file("README.md"), make_ranked_file("package.json")]
+
+        # Missing README (404) is skipped; package.json still comes through.
+        def tolerant_fetcher(owner, repo, path, ref, max_size_bytes):
+            if path == "README.md":
+                raise GitHubFileContentError("missing", 404)
+            return make_content(path, "{}")
+
+        evidence = collect_stack_evidence(
+            "acme", "example", "main", ranked_files, fetcher=tolerant_fetcher
+        )
+        self.assertEqual([file.path for file in evidence], ["package.json"])
+
+        # A systemic error (e.g. rate limit) must propagate, not be swallowed.
+        def failing_fetcher(owner, repo, path, ref, max_size_bytes):
+            raise GitHubFileContentError("rate limited", 429)
+
+        with self.assertRaises(GitHubFileContentError):
+            collect_stack_evidence(
+                "acme", "example", "main", ranked_files, fetcher=failing_fetcher
+            )
 
 
 if __name__ == "__main__":

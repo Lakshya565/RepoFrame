@@ -24,10 +24,24 @@ Current frontend structure:
 frontend/
   public/
   src/app/
+    page.tsx                      Landing page with the repo URL form
+    analysis/page.tsx             Analysis page that composes the cards below
   src/components/
-    user-context-form.tsx  ← Phase 9: user context questionnaire
+    repo-url-form.tsx             Repo URL entry and submission
+    repo-summary-card.tsx         GitHub metadata summary
+    tech-stack-card.tsx           Detected tech stack with evidence
+    important-files-card.tsx      Ranked important files
+    repo-tree-view.tsx            Expandable file tree
+    github-rate-limit-card.tsx    GitHub API budget
+    user-context-form.tsx         Phase 9: user context questionnaire
+    project-writeup-section.tsx   Phase 11: orchestrates profile + output generation
+    generated-outputs-card.tsx    Phase 11: tabbed outputs (resume/README/etc. + interview)
+    evidence-panel.tsx            Phase 11: claim-to-source links for the profile
   src/lib/
-    user-context.ts        ← Phase 9: questionnaire data shapes and field metadata
+    repo-api.ts                   Typed client for every backend endpoint
+    repo-tree.ts                  Builds the nested tree from GitHub's flat path list
+    user-context.ts               Phase 9: questionnaire data shapes and field metadata
+    outputs.ts                    Phase 11: shared output section <-> text helpers
   package.json
   tsconfig.json
 ```

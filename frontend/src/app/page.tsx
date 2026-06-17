@@ -24,9 +24,11 @@ export default function Home() {
         <section className="mt-12 border-t border-slate-200 pt-8">
           <h2 className="text-2xl font-semibold">How it works</h2>
           <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">
-            Copy the repository&apos;s HTTPS browser or clone URL from GitHub.
-            This first version validates the URL and shows the parsed owner and
-            repository name.
+            Paste a public repository&apos;s HTTPS browser or clone URL from
+            GitHub. RepoFrame reads its structure, ranks the most relevant files,
+            and detects the tech stack, then uses your project context to generate
+            evidence-backed resume bullets, README sections, portfolio blurbs, and
+            interview prep.
           </p>
         </section>
       </section>

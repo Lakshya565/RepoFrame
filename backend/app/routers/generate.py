@@ -21,7 +21,6 @@ from app.services.github_service import (
     GitHubMetadataError,
     GitHubTreeError,
     fetch_repo_metadata,
-    fetch_repo_text_file,
     fetch_repo_tree,
 )
 from app.services.llm_client import LLMError
@@ -36,9 +35,8 @@ from app.services.profile_generator import (
 )
 from app.services.repo_parser import RepoUrlParseError, parse_github_repo_url
 from app.services.tech_stack_detector import (
-    MAX_STACK_EVIDENCE_FILE_SIZE_BYTES,
+    collect_stack_evidence,
     detect_tech_stack,
-    select_stack_evidence_files,
 )
 
 router = APIRouter(prefix="/api/generate", tags=["generate"])
@@ -64,23 +62,12 @@ def generate_profile(request: GenerateProfileRequest) -> GenerateProfileResponse
 
         # Tech-stack detection reads only ranked README/manifest files (Phase 6),
         # tolerating per-file gaps so a missing manifest does not fail the run.
-        stack_evidence_files = select_stack_evidence_files(ranked_files)
-        file_contents = []
-        for file in stack_evidence_files:
-            try:
-                file_contents.append(
-                    fetch_repo_text_file(
-                        parsed_repo.owner,
-                        parsed_repo.repo,
-                        file.path,
-                        metadata.default_branch,
-                        MAX_STACK_EVIDENCE_FILE_SIZE_BYTES,
-                    )
-                )
-            except GitHubFileContentError as exc:
-                if exc.status_code not in {404, 413, 415}:
-                    raise
-
+        file_contents = collect_stack_evidence(
+            parsed_repo.owner,
+            parsed_repo.repo,
+            metadata.default_branch,
+            ranked_files,
+        )
         technologies = detect_tech_stack(metadata, ranked_files, file_contents)
 
         # Bounded source/README/config evidence (Phase 7) feeds the prompt body.

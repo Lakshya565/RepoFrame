@@ -21,15 +21,13 @@ from app.services.github_service import (
     GitHubFileContentError,
     GitHubMetadataError,
     GitHubTreeError,
-    fetch_repo_text_file,
     fetch_repo_metadata,
     fetch_repo_tree,
 )
 from app.services.repo_parser import RepoUrlParseError, parse_github_repo_url
 from app.services.tech_stack_detector import (
-    MAX_STACK_EVIDENCE_FILE_SIZE_BYTES,
+    collect_stack_evidence,
     detect_tech_stack,
-    select_stack_evidence_files,
 )
 
 router = APIRouter(prefix="/api/repo", tags=["repo"])
@@ -173,24 +171,14 @@ def get_repo_tech_stack(request: RepoParseRequest) -> TechStackResponse:
             metadata.default_branch,
         )
         ranked_files = rank_important_files(tree.files)
-        stack_evidence_files = select_stack_evidence_files(ranked_files)
-        file_contents = []
-        for file in stack_evidence_files:
-            try:
-                file_contents.append(
-                    fetch_repo_text_file(
-                        parsed_repo.owner,
-                        parsed_repo.repo,
-                        file.path,
-                        metadata.default_branch,
-                        MAX_STACK_EVIDENCE_FILE_SIZE_BYTES,
-                    )
-                )
-            except GitHubFileContentError as exc:
-                # Phase 6 can still use path and metadata evidence when one
-                # optional manifest is missing, oversized, or not UTF-8 text.
-                if exc.status_code not in {404, 413, 415}:
-                    raise
+        # Fetches the bounded README/manifest set and tolerates per-file gaps;
+        # the service owns the fetch-and-skip logic so this route stays thin.
+        file_contents = collect_stack_evidence(
+            parsed_repo.owner,
+            parsed_repo.repo,
+            metadata.default_branch,
+            ranked_files,
+        )
     except RepoUrlParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except GitHubMetadataError as exc:

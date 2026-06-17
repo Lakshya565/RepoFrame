@@ -2,12 +2,18 @@ import json
 import re
 import tomllib
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any, cast
 
 from app.services.file_ranker import RankedRepoFile
-from app.services.github_service import GitHubRepoMetadata, GitHubTextFileContent
+from app.services.github_service import (
+    GitHubFileContentError,
+    GitHubRepoMetadata,
+    GitHubTextFileContent,
+    fetch_repo_text_file,
+)
 
 MAX_STACK_EVIDENCE_FILES = 8
 MAX_STACK_EVIDENCE_FILE_SIZE_BYTES = 80_000
@@ -228,6 +234,17 @@ class DetectedTechnology:
     evidence: list[TechStackEvidence]
 
 
+# GitHub statuses that are acceptable for a single optional manifest: not found,
+# too large, or not UTF-8 text. Phase 6 can still detect the stack from path and
+# metadata signals when one such file is unavailable, so these are skipped rather
+# than failed. Any other status is systemic (rate limit, auth, upstream) and is
+# re-raised so the route can surface a real error.
+_TOLERATED_EVIDENCE_STATUSES = {404, 413, 415}
+
+# Type of the content fetcher so tests can inject a fake without hitting GitHub.
+ContentFetcher = Callable[..., GitHubTextFileContent]
+
+
 # Chooses the ranked files Phase 6 is allowed to read. This is intentionally
 # smaller than Phase 7: README and dependency/config manifests only.
 def select_stack_evidence_files(
@@ -245,6 +262,37 @@ def select_stack_evidence_files(
     ]
 
     return selected_files[:limit]
+
+
+# Fetches the bounded README/manifest files Phase 6 is allowed to read, tolerating
+# per-file gaps (missing, oversized, or non-text) so one absent manifest never
+# fails detection. Returns the successfully fetched text files for detect_tech_stack.
+# Shared by both routes that run stack detection so the fetch-and-tolerate logic
+# lives in one place rather than being duplicated in the route handlers.
+def collect_stack_evidence(
+    owner: str,
+    repo: str,
+    ref: str,
+    ranked_files: list[RankedRepoFile],
+    fetcher: ContentFetcher = fetch_repo_text_file,
+) -> list[GitHubTextFileContent]:
+    file_contents: list[GitHubTextFileContent] = []
+    for file in select_stack_evidence_files(ranked_files):
+        try:
+            file_contents.append(
+                fetcher(
+                    owner,
+                    repo,
+                    file.path,
+                    ref,
+                    MAX_STACK_EVIDENCE_FILE_SIZE_BYTES,
+                )
+            )
+        except GitHubFileContentError as exc:
+            if exc.status_code not in _TOLERATED_EVIDENCE_STATUSES:
+                raise
+
+    return file_contents
 
 
 # Detects stack entries from metadata, ranked paths, and the bounded manifest
