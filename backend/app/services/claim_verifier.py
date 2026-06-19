@@ -18,6 +18,7 @@ from app.services.llm_client import (
     complete_with_tools,
     openai_agent_completion,
 )
+from app.services.prompt_format import format_evidence_excerpts, format_user_context
 from app.services.token_estimator import estimate_input_tokens
 
 # Phase 12 agentic claim verification. This service owns the bounded agent LOOP:
@@ -170,42 +171,11 @@ def _format_claims(
     return "\n\n".join(blocks)
 
 
-# Formats the questionnaire answers for the prompt, marking blanks explicitly so
-# the agent never treats an empty answer as a fact it can lean on.
-def _format_user_context(user_context: UserContextInput) -> str:
-    def value(text: str) -> str:
-        stripped = text.strip()
-        return stripped if stripped else "(not provided)"
-
-    collaboration = user_context.collaboration or "(not provided)"
-
-    return (
-        f"- Project purpose: {value(user_context.purpose)}\n"
-        f"- Built solo or as a team: {collaboration}\n"
-        f"- User's personal contribution: {value(user_context.contribution)}\n"
-        f"- Target user or client: {value(user_context.target_user)}\n"
-        f"- Hardest technical part: {value(user_context.hardest_part)}\n"
-        f"- Impact or results: {value(user_context.impact)}"
-    )
-
-
-# Renders the selected evidence as labeled, inline excerpts so the agent can read
-# it directly rather than depending on tool calls to ever see any content (the
-# bundle is already bounded by collect_file_evidence, so this fits the budget the
-# same way profile generation's evidence block does). Truncated files are flagged.
-def _format_evidence_block(evidence: RepoEvidenceCollection) -> str:
-    if not evidence.selected_files:
-        return "(no evidence files were available)"
-    blocks = []
-    for file in evidence.selected_files:
-        suffix = " (truncated)" if file.truncated else ""
-        blocks.append(f"### {file.path} [{file.source_type}]{suffix}\n{file.content}")
-    return "\n\n".join(blocks)
-
-
 # Builds the initial user message: the claims to verify (optionally scoped to
-# specific tabs), the user context, and the full selected evidence inline (which
-# the optional tools can also re-query).
+# specific tabs), the user context, and the full selected evidence inline (the
+# evidence is shown directly so the agent never judges blind; the optional tools
+# can also re-query it). User-context and evidence formatting are shared with
+# profile generation via prompt_format.
 def _build_initial_prompt(
     outputs: GeneratedOutputs,
     user_context: UserContextInput,
@@ -216,9 +186,9 @@ def _build_initial_prompt(
         "GENERATED OUTPUTS TO VERIFY\n"
         f"{_format_claims(outputs, sections)}\n\n"
         "USER-PROVIDED CONTEXT\n"
-        f"{_format_user_context(user_context)}\n\n"
+        f"{format_user_context(user_context)}\n\n"
         "REPOSITORY EVIDENCE (the selected files in full; the tools can re-query these)\n"
-        f"{_format_evidence_block(evidence)}"
+        f"{format_evidence_excerpts(evidence, '(no evidence files were available)')}"
     )
 
 

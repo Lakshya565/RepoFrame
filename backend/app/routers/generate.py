@@ -1,3 +1,5 @@
+from collections import Counter
+
 from fastapi import APIRouter, HTTPException
 
 from app.config import OPENAI_MODEL
@@ -16,7 +18,7 @@ from app.schemas.profile import (
 )
 from app.schemas.usage import UsageTotals
 from app.schemas.verify import VerifyClaimsRequest, VerifyClaimsResponse
-from app.services import usage_store
+from app.services import metrics_store, usage_store
 from app.services.claim_verifier import verify_claims
 from app.services.file_content_service import collect_file_evidence
 from app.services.file_ranker import rank_important_files
@@ -85,12 +87,13 @@ def generate_profile(request: GenerateProfileRequest) -> GenerateProfileResponse
         # Prompt construction, budget enforcement, and the OpenAI call all happen
         # inside the generator; it returns the validated profile, the pre-call
         # token estimate, and the real post-call token usage.
-        profile, estimated_input_tokens, usage = generate_project_profile(
-            metadata,
-            technologies,
-            evidence,
-            request.user_context,
-        )
+        with metrics_store.timed("llm"):
+            profile, estimated_input_tokens, usage = generate_project_profile(
+                metadata,
+                technologies,
+                evidence,
+                request.user_context,
+            )
     except RepoUrlParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except GitHubMetadataError as exc:
@@ -105,6 +108,12 @@ def generate_profile(request: GenerateProfileRequest) -> GenerateProfileResponse
     # Record the real usage to the lifetime ledger (safe: a ledger failure never
     # discards the completed generation).
     usage_store.record(usage)
+    # Profile generation is the canonical "analyze a repo" action (Phase 13).
+    metrics_store.increment(
+        repos_analyzed=1,
+        files_scanned=tree.total_files,
+        files_selected=len(evidence.selected_files),
+    )
 
     return GenerateProfileResponse(
         owner=parsed_repo.owner,
@@ -144,13 +153,15 @@ def generate_profile(request: GenerateProfileRequest) -> GenerateProfileResponse
 @router.post("/outputs", response_model=GenerateOutputsResponse)
 def generate_outputs(request: GenerateOutputsRequest) -> GenerateOutputsResponse:
     try:
-        outputs, estimated_input_tokens, usage = generate_core_outputs(
-            request.profile, request.sections, request.guidance
-        )
+        with metrics_store.timed("llm"):
+            outputs, estimated_input_tokens, usage = generate_core_outputs(
+                request.profile, request.sections, request.guidance
+            )
     except LLMError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
     usage_store.record(usage)
+    metrics_store.increment(outputs_generated=1)
 
     return GenerateOutputsResponse(
         outputs=outputs,
@@ -167,12 +178,13 @@ def generate_outputs(request: GenerateOutputsRequest) -> GenerateOutputsResponse
 @router.post("/outputs/revise", response_model=GenerateOutputsResponse)
 def revise_output_endpoint(request: ReviseOutputRequest) -> GenerateOutputsResponse:
     try:
-        outputs, estimated_input_tokens, usage = revise_output(
-            request.profile,
-            request.section,
-            request.current_text,
-            request.instruction,
-        )
+        with metrics_store.timed("llm"):
+            outputs, estimated_input_tokens, usage = revise_output(
+                request.profile,
+                request.section,
+                request.current_text,
+                request.instruction,
+            )
     except LLMError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
@@ -194,9 +206,10 @@ def generate_interview_prep_endpoint(
     request: GenerateInterviewPrepRequest,
 ) -> GenerateInterviewPrepResponse:
     try:
-        topics, estimated_input_tokens, usage = generate_interview_prep(
-            request.profile, request.guidance
-        )
+        with metrics_store.timed("llm"):
+            topics, estimated_input_tokens, usage = generate_interview_prep(
+                request.profile, request.guidance
+            )
     except LLMError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
@@ -233,9 +246,10 @@ def verify_claims_endpoint(request: VerifyClaimsRequest) -> VerifyClaimsResponse
             metadata.default_branch,
             ranked_files,
         )
-        verifications, estimated_input_tokens, usage = verify_claims(
-            evidence, request.outputs, request.user_context, request.sections
-        )
+        with metrics_store.timed("llm"):
+            verifications, estimated_input_tokens, usage = verify_claims(
+                evidence, request.outputs, request.user_context, request.sections
+            )
     except RepoUrlParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except GitHubMetadataError as exc:
@@ -248,6 +262,16 @@ def verify_claims_endpoint(request: VerifyClaimsRequest) -> VerifyClaimsResponse
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
     usage_store.record(usage)
+    # Record claim-quality metrics (Phase 13): how many claims were checked and the
+    # breakdown by verification status.
+    status_counts = Counter(item.status for item in verifications)
+    metrics_store.increment(
+        claims_verified=len(verifications),
+        claims_supported=status_counts["supported"],
+        claims_partially_supported=status_counts["partially_supported"],
+        claims_needs_confirmation=status_counts["needs_user_confirmation"],
+        claims_unsupported=status_counts["unsupported"],
+    )
 
     return VerifyClaimsResponse(
         verifications=verifications,

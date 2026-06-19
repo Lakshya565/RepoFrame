@@ -13,6 +13,7 @@ from app.services.llm_client import (
     complete,
     openai_completion,
 )
+from app.services.prompt_format import format_evidence_excerpts, format_user_context
 from app.services.tech_stack_detector import DetectedTechnology
 
 # Project-profile generation failures are LLM errors. This alias preserves the
@@ -48,26 +49,6 @@ _SYSTEM_PROMPT = (
 )
 
 
-# Formats the user questionnaire answers for the prompt, replacing blanks with an
-# explicit "not provided" so the model never treats an empty string as a fact and
-# knows which non-repo details it genuinely lacks.
-def _format_user_context(user_context: UserContextInput) -> str:
-    def value(text: str) -> str:
-        stripped = text.strip()
-        return stripped if stripped else "(not provided)"
-
-    collaboration = user_context.collaboration or "(not provided)"
-
-    return (
-        f"- Project purpose: {value(user_context.purpose)}\n"
-        f"- Built solo or as a team: {collaboration}\n"
-        f"- User's personal contribution: {value(user_context.contribution)}\n"
-        f"- Target user or client: {value(user_context.target_user)}\n"
-        f"- Hardest technical part: {value(user_context.hardest_part)}\n"
-        f"- Impact or results: {value(user_context.impact)}"
-    )
-
-
 # Renders detected technologies as a compact, evidence-tagged list so the model
 # can ground detectedTechStack in what the deterministic Phase 6 detector already
 # confirmed, rather than re-guessing the stack from raw files.
@@ -80,22 +61,6 @@ def _format_tech_stack(technologies: list[DetectedTechnology]) -> str:
         sources = ", ".join(sorted({item.source for item in tech.evidence}))
         lines.append(f"- {tech.name} ({tech.category}); evidence: {sources or 'n/a'}")
     return "\n".join(lines)
-
-
-# Renders the bounded file evidence as labeled excerpts. The evidence is already
-# trimmed to the character limits by collect_file_evidence, so this only needs to
-# present it; truncated files are flagged so the model knows the excerpt partial.
-def _format_evidence(evidence: RepoEvidenceCollection) -> str:
-    if not evidence.selected_files:
-        return "(no file evidence available)"
-
-    blocks = []
-    for file in evidence.selected_files:
-        suffix = " (truncated)" if file.truncated else ""
-        blocks.append(
-            f"### {file.path} [{file.source_type}]{suffix}\n{file.content}"
-        )
-    return "\n\n".join(blocks)
 
 
 # Assembles the full user-side prompt from repo metadata, detected stack, file
@@ -119,9 +84,9 @@ def build_profile_prompt(
         "DETECTED TECH STACK\n"
         f"{_format_tech_stack(technologies)}\n\n"
         "USER-PROVIDED CONTEXT\n"
-        f"{_format_user_context(user_context)}\n\n"
+        f"{format_user_context(user_context)}\n\n"
         "REPOSITORY FILE EVIDENCE\n"
-        f"{_format_evidence(evidence)}"
+        f"{format_evidence_excerpts(evidence, '(no file evidence available)')}"
     )
 
 

@@ -317,9 +317,7 @@ In the frontend, display outputs in clean tabs with copy buttons. Add an Evidenc
 
 ---
 
-# Phase 12: Agentic Claim Verification + Token Metering
-
-> Full working plan: see PHASE_12_PLAN.md.
+# Phase 12(DONE, DO NOT TOUCH): Agentic Claim Verification + Token Metering
 
 ## Goal
 
@@ -351,7 +349,7 @@ Frontend claim status display near the EvidencePanel
 ## Codex Prompt
 
 ```text
-Implement Phase 12 in this order (see PHASE_12_PLAN.md for full detail):
+Implement Phase 12 in this order:
 
 1. Token-metering foundation. Capture real OpenAI usage at the single LLM
    chokepoint (llm_client). Add prompt/completion/reasoning/total token fields to
@@ -399,7 +397,7 @@ tool, not just a generic AI writing app.
 
 ---
 
-# Phase 13: Usage Metrics and System Metrics
+# Phase 13(DONE, DO NOT TOUCH): Usage Metrics and System Metrics
 
 > Note: token usage tracking (real per-analysis usage + a persistent lifetime
 > token ledger) was pulled forward into Phase 12. Phase 13 now covers the
@@ -451,6 +449,9 @@ reporting.
 
 Make the app demoable.
 
+> Note: more UI ideas are coming from the user — this section will be expanded
+> before Phase 14 is built.
+
 ## Add
 
 ```text
@@ -465,6 +466,7 @@ Subtle animations
 Better evidence display
 Better claim verification display
 README screenshots
+Developer metrics panel (floating button → metrics drawer)
 ```
 
 ## Codex Prompt
@@ -473,6 +475,30 @@ README screenshots
 Polish the RepoFrame MVP. Improve loading, error, and empty states across the frontend. Make the UI feel like a clean developer tool, not a generic AI app. Add example repo cards on the landing page, improve spacing and typography, and make the analysis flow easy to demo in under 60 seconds.
 
 Add subtle animations only where they improve clarity, such as loading states, tab transitions, collapsible evidence cards, or analysis progress steps. Do not add distracting animations or major new features.
+```
+
+## Developer metrics panel (moved here from Phase 13 discussion)
+
+A small, self-contained UI surface for the metrics the backend already records.
+Deferred from Phase 13 into Phase 14 so it lands with the rest of the UI work.
+
+```text
+- A small fixed button in the bottom-right corner opens a slide-in metrics drawer.
+- Pure frontend + read-only: it fetches the existing zero-cost GET endpoints
+  GET /api/usage/total (lifetime tokens) and GET /api/metrics (counters + latency).
+  It spends no tokens and the backend stays the single source of truth — the panel
+  only displays; all recording keeps happening backend-side as it does now.
+- Show, grouped: Tokens (lifetime: prompt/completion/reasoning/total + runs);
+  Activity (repos analyzed, files scanned/selected, outputs generated); Claim
+  quality (verified + supported/partial/needs-confirmation/unsupported); Reliability
+  (requests, errors → error rate, LLM latency avg/max, backend latency avg/max).
+- Label scope honestly: token totals are persistent/lifetime; the system metrics
+  are in-memory and reset on backend restart ("since restart"), so label them so.
+- Gate visibility behind a NEXT_PUBLIC_SHOW_METRICS env flag: these metrics are
+  backend-GLOBAL (not per-user), so the panel is on for local/dev and can be hidden
+  in public builds until per-user metrics + auth exist (Phase 15+).
+- Reuse existing card styling; ~2 components (floating button + drawer) and one new
+  api helper (fetchMetrics; fetchLifetimeUsage already exists).
 ```
 
 ---

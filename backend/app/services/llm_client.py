@@ -116,9 +116,18 @@ def _get_client():
     return _client
 
 
+# Adds the sampling parameter the configured model accepts: reasoning models take
+# `reasoning_effort` (and reject `temperature`); other models take `temperature`.
+# Shared by the single-shot and tool-calling request builders.
+def _apply_sampling_params(kwargs: dict) -> None:
+    if _is_reasoning_model(OPENAI_MODEL):
+        kwargs["reasoning_effort"] = OPENAI_REASONING_EFFORT
+    else:
+        kwargs["temperature"] = OPENAI_TEMPERATURE
+
+
 # Builds the create() kwargs for the configured model. json_object forces valid
 # JSON (the schema is enforced afterwards by validating against a Pydantic model).
-# Reasoning models take `reasoning_effort`; other models take `temperature`.
 def _build_create_kwargs(system_prompt: str, user_prompt: str) -> dict:
     kwargs: dict = {
         "model": OPENAI_MODEL,
@@ -129,10 +138,7 @@ def _build_create_kwargs(system_prompt: str, user_prompt: str) -> dict:
         "response_format": {"type": "json_object"},
         "max_completion_tokens": OPENAI_MAX_OUTPUT_TOKENS,
     }
-    if _is_reasoning_model(OPENAI_MODEL):
-        kwargs["reasoning_effort"] = OPENAI_REASONING_EFFORT
-    else:
-        kwargs["temperature"] = OPENAI_TEMPERATURE
+    _apply_sampling_params(kwargs)
     return kwargs
 
 
@@ -296,10 +302,7 @@ def _build_agent_kwargs(
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = tool_choice
-    if _is_reasoning_model(OPENAI_MODEL):
-        kwargs["reasoning_effort"] = OPENAI_REASONING_EFFORT
-    else:
-        kwargs["temperature"] = OPENAI_TEMPERATURE
+    _apply_sampling_params(kwargs)
     return kwargs
 
 

@@ -64,6 +64,8 @@ backend/
       output_generator.py   ← Phase 11: core output + interview-prep generation
       claim_verifier.py     ← Phase 12: bounded tool-calling claim-verification agent
       usage_store.py        ← Phase 12: persistent lifetime token ledger (JSON stopgap)
+      prompt_format.py      ← shared prompt formatting (user context, evidence excerpts)
+      metrics_store.py      ← Phase 13: in-memory operational + claim-quality metrics
   data/                ← Phase 12: usage.json ledger (git-ignored, local state)
   requirements.txt
 ```
@@ -113,7 +115,7 @@ cd backend
 
 ## Current Scope
 
-Phases 1 through 12 are implemented. The app has a landing page with a GitHub repository URL input, loading and error states, and an analysis page driven by a FastAPI backend. The backend currently exposes:
+Phases 1 through 13 are implemented. The app has a landing page with a GitHub repository URL input, loading and error states, and an analysis page driven by a FastAPI backend. The backend currently exposes:
 
 - `GET /health` — service health check.
 - `POST /api/repo/parse` — normalize a GitHub URL into owner/repo.
@@ -129,6 +131,7 @@ Phases 1 through 12 are implemented. The app has a landing page with a GitHub re
 - `POST /api/generate/verify` — run the bounded agentic claim-verification workflow over generated outputs (opt-in only).
 - `GET /api/github/rate-limit` — report the current GitHub REST API budget.
 - `GET /api/usage/total` — report the persistent lifetime OpenAI token totals recorded by the backend.
+- `GET /api/metrics` — developer view of operational and claim-quality metrics (repos analyzed, files scanned/selected, outputs generated, claim verification counts by status, request/error counts, LLM/backend latency).
 
 Phase 7 file-content fetching is intentionally bounded: it selects README, dependency/config manifests, and the top-ranked source files, then enforces a maximum number of files, a per-file character limit, and a total character limit across all excerpts. Files that are missing, oversized, non-text, or beyond the limits are returned as skipped with a clear reason, so the evidence stays small and auditable.
 
@@ -157,5 +160,7 @@ Two efficiency/safety properties: (1) the **profile is generated once and reused
 Phase 12 adds agentic claim verification and token tracking. `POST /api/generate/verify` rebuilds the already-selected repo evidence from the URL (the same deterministic pipeline as profile generation, no extra tokens), then runs a **bounded tool-calling agent** over it: the selected evidence is given to the model inline, with two optional read-only tools (`search_evidence`, `read_evidence_file`) to re-query it, scoped to that evidence only. The agent identifies the discrete factual claims across **every** generated tab (resume bullets, README intro, portfolio blurb, LinkedIn description) and labels each `supported`, `partially_supported`, `needs_user_confirmation`, or `unsupported` with supporting evidence, an explanation, and an optional suggested revision. A fact that appears in more than one tab is verified **once** and tagged with each tab it appears in, so coverage is full without paying to re-verify the same claim per tab. The user-provided context counts as first-class evidence: a claim the repo cannot show (ownership, team size, intent, impact) is `supported` and cited as "user context" when the questionnaire backs it. The frontend offers a "Verify all claims" action plus per-tab buttons for a targeted re-check. The agent cannot fetch new files or run repo code, and the loop is bounded by `VERIFY_MAX_ITERATIONS` and `VERIFY_MAX_TOOL_CALLS` (plus the existing per-call prompt budget); the final turn forces a verdict so a run never ends mid-search. Like interview prep it is opt-in — the frontend calls it only when the user clicks a verify action, so it never spends tokens in the default flow. The single model turn and all OpenAI/error/budget plumbing stay in `llm_client` (`complete_with_tools`); the loop, tools, and dispatch live in `claim_verifier`.
 
 Token tracking (pulled forward from Phase 13) makes spend visible. The shared `llm_client` now captures the **real** per-call token usage from OpenAI (prompt, completion, reasoning, and total tokens — reasoning tokens broken out because that is where a reasoning model's cost mostly hides), and every generation/verification endpoint returns it. The frontend accumulates a per-session meter, and a persistent lifetime ledger (`usage_store`, a git-ignored `backend/data/usage.json` written atomically) tracks cumulative spend across runs, exposed at `GET /api/usage/total` and shown as a badge — so project spend is visible without opening the OpenAI dashboard. The ledger counts only what this backend spends (not the whole OpenAI account) and is backend-global (no per-user accounting yet); it is an intentional stopgap to be replaced by the Phase 15 database behind the same interface. No dollar-cost estimate is computed.
+
+Phase 13 adds operational and claim-quality metrics (the token-usage slice of this phase already shipped in Phase 12). `app/services/metrics_store.py` keeps a lightweight **in-memory** set of cumulative counters (repos analyzed, files scanned, files selected, outputs generated, claims verified and the breakdown by status, request and error counts) and latency aggregates (LLM and backend, as count/average/max). A FastAPI middleware records backend latency, request counts, and server-error (5xx) counts uniformly for every API request; the generation and verification routes record LLM latency and the domain counters. `GET /api/metrics` exposes a snapshot for debugging and project reporting. The store is in-memory by design (high-frequency, resets on restart) — an intentional stopgap, swappable for a Supabase-backed implementation in Phase 15 behind the same record/snapshot interface. No dollar-cost estimate is computed.
 
 Database persistence and authentication are planned but not implemented yet.
