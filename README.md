@@ -34,9 +34,11 @@ frontend/
     repo-tree-view.tsx            Expandable file tree
     github-rate-limit-card.tsx    GitHub API budget
     user-context-form.tsx         Phase 9: user context questionnaire
-    project-writeup-section.tsx   Phase 11: orchestrates profile + output generation
+    project-writeup-section.tsx   Phase 11/12: orchestrates generation, verification, usage meter
     generated-outputs-card.tsx    Phase 11: tabbed outputs (resume/README/etc. + interview)
     evidence-panel.tsx            Phase 11: claim-to-source links for the profile
+    claim-verification-panel.tsx  Phase 12: per-claim verification status display
+    token-usage-panel.tsx         Phase 12: per-session + lifetime token meter
   src/lib/
     repo-api.ts                   Typed client for every backend endpoint
     repo-tree.ts                  Builds the nested tree from GitHub's flat path list
@@ -57,9 +59,12 @@ backend/
     schemas/
     services/
       token_estimator.py  ← Phase 8: prompt budget check and token estimation
-      llm_client.py         ← Phase 11: shared OpenAI client, budget/error handling
+      llm_client.py         ← Phase 11/12: shared OpenAI client (single-shot + tool-calling), usage capture
       profile_generator.py  ← Phase 10: prompt construction + OpenAI profile generation
       output_generator.py   ← Phase 11: core output + interview-prep generation
+      claim_verifier.py     ← Phase 12: bounded tool-calling claim-verification agent
+      usage_store.py        ← Phase 12: persistent lifetime token ledger (JSON stopgap)
+  data/                ← Phase 12: usage.json ledger (git-ignored, local state)
   requirements.txt
 ```
 
@@ -108,7 +113,7 @@ cd backend
 
 ## Current Scope
 
-Phases 1 through 11 are implemented. The app has a landing page with a GitHub repository URL input, loading and error states, and an analysis page driven by a FastAPI backend. The backend currently exposes:
+Phases 1 through 12 are implemented. The app has a landing page with a GitHub repository URL input, loading and error states, and an analysis page driven by a FastAPI backend. The backend currently exposes:
 
 - `GET /health` — service health check.
 - `POST /api/repo/parse` — normalize a GitHub URL into owner/repo.
@@ -121,7 +126,9 @@ Phases 1 through 11 are implemented. The app has a landing page with a GitHub re
 - `POST /api/generate/outputs` — generate core written outputs (resume bullets, README intro, portfolio blurb, LinkedIn description) from a project profile; an optional `sections` list scopes generation to one section (used for per-tab generation).
 - `POST /api/generate/outputs/revise` — feedback-driven regenerate of one section: revises the user's current draft using their edits plus an optional (length-capped) instruction, kept the same length/format.
 - `POST /api/generate/interview-prep` — generate interview talking points from a project profile (opt-in only).
+- `POST /api/generate/verify` — run the bounded agentic claim-verification workflow over generated outputs (opt-in only).
 - `GET /api/github/rate-limit` — report the current GitHub REST API budget.
+- `GET /api/usage/total` — report the persistent lifetime OpenAI token totals recorded by the backend.
 
 Phase 7 file-content fetching is intentionally bounded: it selects README, dependency/config manifests, and the top-ranked source files, then enforces a maximum number of files, a per-file character limit, and a total character limit across all excerpts. Files that are missing, oversized, non-text, or beyond the limits are returned as skipped with a clear reason, so the evidence stays small and auditable.
 
@@ -146,5 +153,9 @@ On the frontend, the analysis page's `ProjectWriteupSection` lifts the questionn
 Interview prep is a fifth tab alongside the four outputs, with its own generate and copy. Every tab (and a shared one for "Generate all") has an optional **instructions box** folded into the prompt up front, so a result can be steered to spec on the first try instead of regenerating — the per-tab box doubles as the feedback input for Regenerate. The profile is reused across calls only while the questionnaire is unchanged; editing the questionnaire refreshes it on the next call so grounding stays current.
 
 Two efficiency/safety properties: (1) the **profile is generated once and reused** for every per-section, revise, and interview call — the raw repo evidence is never re-sent after that, and because the profile is the stable prompt prefix, OpenAI prompt-caches it across calls; (2) a **global lock** allows only one generation at a time — every trigger is disabled while a call is in flight, so rapid clicks cannot stack up concurrent OpenAI calls. An `EvidencePanel` shows the profile's claim-to-source links once a profile exists, and the first generation is slower because it builds the profile (the UI says so). This part of the UI is intentionally functional rather than polished — the visual overhaul comes in the Phase 14 polish pass.
+
+Phase 12 adds agentic claim verification and token tracking. `POST /api/generate/verify` rebuilds the already-selected repo evidence from the URL (the same deterministic pipeline as profile generation, no extra tokens), then runs a **bounded tool-calling agent** over it: the selected evidence is given to the model inline, with two optional read-only tools (`search_evidence`, `read_evidence_file`) to re-query it, scoped to that evidence only. The agent identifies the discrete factual claims across **every** generated tab (resume bullets, README intro, portfolio blurb, LinkedIn description) and labels each `supported`, `partially_supported`, `needs_user_confirmation`, or `unsupported` with supporting evidence, an explanation, and an optional suggested revision. A fact that appears in more than one tab is verified **once** and tagged with each tab it appears in, so coverage is full without paying to re-verify the same claim per tab. The user-provided context counts as first-class evidence: a claim the repo cannot show (ownership, team size, intent, impact) is `supported` and cited as "user context" when the questionnaire backs it. The frontend offers a "Verify all claims" action plus per-tab buttons for a targeted re-check. The agent cannot fetch new files or run repo code, and the loop is bounded by `VERIFY_MAX_ITERATIONS` and `VERIFY_MAX_TOOL_CALLS` (plus the existing per-call prompt budget); the final turn forces a verdict so a run never ends mid-search. Like interview prep it is opt-in — the frontend calls it only when the user clicks a verify action, so it never spends tokens in the default flow. The single model turn and all OpenAI/error/budget plumbing stay in `llm_client` (`complete_with_tools`); the loop, tools, and dispatch live in `claim_verifier`.
+
+Token tracking (pulled forward from Phase 13) makes spend visible. The shared `llm_client` now captures the **real** per-call token usage from OpenAI (prompt, completion, reasoning, and total tokens — reasoning tokens broken out because that is where a reasoning model's cost mostly hides), and every generation/verification endpoint returns it. The frontend accumulates a per-session meter, and a persistent lifetime ledger (`usage_store`, a git-ignored `backend/data/usage.json` written atomically) tracks cumulative spend across runs, exposed at `GET /api/usage/total` and shown as a badge — so project spend is visible without opening the OpenAI dashboard. The ledger counts only what this backend spends (not the whole OpenAI account) and is backend-global (no per-user accounting yet); it is an intentional stopgap to be replaced by the Phase 15 database behind the same interface. No dollar-cost estimate is computed.
 
 Database persistence and authentication are planned but not implemented yet.

@@ -174,12 +174,29 @@ export type ProjectProfileData = {
   evidence: ProfileEvidenceItem[];
 };
 
+// Real OpenAI token usage for one generation (Phase 12). Mirrors the backend
+// UsageTotals; reasoningTokens is the slice spent on hidden reasoning, broken out
+// because it is where a reasoning model's cost mostly hides.
+export type UsageTotals = {
+  promptTokens: number;
+  completionTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+};
+
+// Cumulative lifetime totals from GET /api/usage/total, plus how many generation
+// runs the backend has recorded.
+export type LifetimeUsage = UsageTotals & {
+  runs: number;
+};
+
 export type GenerateProfileResponse = ParsedRepoResponse & {
   defaultBranch: string;
   profile: ProjectProfileData;
   model: string;
   estimatedInputTokens: number;
   evidenceFileCount: number;
+  usage: UsageTotals;
 };
 
 // The four core output sections. Used to scope a regenerate to one section.
@@ -200,6 +217,7 @@ export type GenerateOutputsResponse = {
   outputs: GeneratedOutputs;
   model: string;
   estimatedInputTokens: number;
+  usage: UsageTotals;
 };
 
 export type InterviewTopic = {
@@ -211,6 +229,7 @@ export type GenerateInterviewPrepResponse = {
   topics: InterviewTopic[];
   model: string;
   estimatedInputTokens: number;
+  usage: UsageTotals;
 };
 
 // Generates the structured project profile from a repo URL plus the user's
@@ -269,6 +288,61 @@ export async function reviseOutput(
     { profile, section, currentText, instruction },
     "RepoFrame could not regenerate that section.",
   );
+}
+
+// ── Phase 12: claim verification + usage tracking ────────────────────────────
+
+// How well one generated claim is backed by the repo evidence and user context.
+// Matches the backend's closed status set so the UI can map each to a fixed badge.
+export type ClaimStatus =
+  | "supported"
+  | "partially_supported"
+  | "needs_user_confirmation"
+  | "unsupported";
+
+export type ClaimVerification = {
+  claim: string;
+  status: ClaimStatus;
+  // The output tab(s) this claim appears in. A fact shared across tabs is
+  // verified once and tagged with every tab it shows up in. Typed as string[]
+  // (not OutputSection[]) because the value comes from the model.
+  sections: string[];
+  supportingEvidence: string[];
+  explanation: string;
+  suggestedRevision: string | null;
+};
+
+export type VerifyClaimsResponse = {
+  verifications: ClaimVerification[];
+  model: string;
+  estimatedInputTokens: number;
+  usage: UsageTotals;
+};
+
+// Runs the bounded verification agent over the generated outputs. Like interview
+// prep this is opt-in (an explicit press), so it never spends tokens in the
+// default flow. The backend rebuilds the repo evidence from the URL. An optional
+// sections list scopes a per-tab verification to specific tabs; omit it to verify
+// every tab that has content.
+export async function verifyClaims(
+  repoUrl: string,
+  userContext: UserContext,
+  outputs: GeneratedOutputs,
+  sections?: OutputSection[],
+): Promise<VerifyClaimsResponse> {
+  return postJson(
+    "/api/generate/verify",
+    { repoUrl, userContext, outputs, sections },
+    "RepoFrame could not verify the generated claims.",
+  );
+}
+
+// Fetches the persistent lifetime token totals so the UI can show project spend
+// without anyone opening the OpenAI dashboard.
+export async function fetchLifetimeUsage(): Promise<LifetimeUsage> {
+  const response = await fetch(`${API_BASE_URL}/api/usage/total`);
+
+  return parseResponse(response, "RepoFrame could not fetch usage totals.");
 }
 
 // Posts an arbitrary JSON body and returns typed JSON or a useful Error. The

@@ -73,6 +73,19 @@ OPENAI_MAX_RETRIES: int = int(os.getenv("OPENAI_MAX_RETRIES", "2"))
 
 
 # ============================================================
+# Agentic Claim Verification (Phase 12)
+# ============================================================
+# Hard caps that bound the verification agent loop. The agent is a tool-calling
+# loop, so without bounds it could spin (and spend tokens) indefinitely. These cap
+# how many model turns it gets and how many evidence tool calls it may make in
+# total across those turns. The per-call prompt budget (check_prompt_budget) still
+# applies on every turn on top of these. On the final allowed turn the loop forces
+# a no-tools answer so the run always ends with a verdict rather than mid-search.
+VERIFY_MAX_ITERATIONS: int = int(os.getenv("VERIFY_MAX_ITERATIONS", "8"))
+VERIFY_MAX_TOOL_CALLS: int = int(os.getenv("VERIFY_MAX_TOOL_CALLS", "12"))
+
+
+# ============================================================
 # Per-Session and Per-IP Request Caps (placeholder)
 # ============================================================
 # These constants define the intended limits but are NOT enforced yet.

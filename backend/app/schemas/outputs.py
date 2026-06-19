@@ -3,6 +3,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.profile import ProjectProfile
+from app.schemas.usage import UsageTotals
 
 # The four core output sections. Naming them in a Literal lets a request scope a
 # regenerate to a single section while keeping the set validated in one place.
@@ -41,14 +42,16 @@ class GeneratedOutputs(BaseModel):
     linkedin_description: str | None = Field(default=None, alias="linkedinDescription")
 
 
-# Core-output endpoint response: the outputs plus minimal generation metadata for
-# cost transparency (which model ran and the pre-call input-size estimate).
+# Core-output endpoint response: the outputs plus generation metadata — which
+# model ran, the pre-call input-size estimate, and the real post-call token usage
+# (Phase 12) that feeds the per-analysis meter and the lifetime ledger.
 class GenerateOutputsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     outputs: GeneratedOutputs
     model: str
     estimated_input_tokens: int = Field(alias="estimatedInputTokens")
+    usage: UsageTotals
 
 
 # Request to revise a single existing output section using user feedback: the
@@ -92,11 +95,12 @@ class GenerateInterviewPrepRequest(BaseModel):
     guidance: str = Field(default="", max_length=400)
 
 
-# Interview-prep endpoint response: the topics plus the same cost-transparency
-# metadata as the other generation endpoints.
+# Interview-prep endpoint response: the topics plus the same generation metadata
+# (model, pre-call estimate, real token usage) as the other generation endpoints.
 class GenerateInterviewPrepResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     topics: list[InterviewTopic]
     model: str
     estimated_input_tokens: int = Field(alias="estimatedInputTokens")
+    usage: UsageTotals

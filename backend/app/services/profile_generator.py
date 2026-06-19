@@ -9,6 +9,7 @@ from app.services.llm_client import (
     CompletionFn,
     CompletionResult,  # noqa: F401 - re-exported for callers/tests of this module
     LLMError,
+    TokenUsage,
     complete,
     openai_completion,
 )
@@ -126,19 +127,21 @@ def build_profile_prompt(
 
 # Builds the prompt, then delegates budget enforcement, the (injectable) OpenAI
 # call, and truncation/empty guards to the shared llm_client.complete, and finally
-# validates the returned JSON against ProjectProfile. Returns the parsed profile
-# plus the pre-call token estimate for cost transparency. Failures are mapped to a
-# ProfileGenerationError (LLMError) with an appropriate status for the route.
+# validates the returned JSON against ProjectProfile. Returns the parsed profile,
+# the pre-call token estimate, and the real token usage for cost tracking. Failures
+# are mapped to a ProfileGenerationError (LLMError) with a status for the route.
 def generate_project_profile(
     metadata: GitHubRepoMetadata,
     technologies: list[DetectedTechnology],
     evidence: RepoEvidenceCollection,
     user_context: UserContextInput,
     completion_fn: CompletionFn = openai_completion,
-) -> tuple[ProjectProfile, int]:
+) -> tuple[ProjectProfile, int, TokenUsage]:
     user_prompt = build_profile_prompt(metadata, technologies, evidence, user_context)
 
-    content, estimated_tokens = complete(_SYSTEM_PROMPT, user_prompt, completion_fn)
+    content, estimated_tokens, usage = complete(
+        _SYSTEM_PROMPT, user_prompt, completion_fn
+    )
 
     # The model is asked for JSON; validate it (parse + schema) so a malformed or
     # off-schema response becomes a clean error instead of leaking half-formed data.
@@ -154,4 +157,4 @@ def generate_project_profile(
             "OpenAI response was not valid JSON.", 502
         ) from exc
 
-    return profile, estimated_tokens
+    return profile, estimated_tokens, usage

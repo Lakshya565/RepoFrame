@@ -51,7 +51,7 @@ def all_outputs_json() -> str:
 
 class OutputGeneratorTests(unittest.TestCase):
     def test_generates_all_sections_by_default(self) -> None:
-        outputs, tokens = generate_core_outputs(
+        outputs, tokens, _ = generate_core_outputs(
             make_profile(), None, completion_fn=fake_completion(all_outputs_json())
         )
 
@@ -65,7 +65,7 @@ class OutputGeneratorTests(unittest.TestCase):
     def test_scoped_section_returns_only_requested(self) -> None:
         # Even though the fake returns all four keys, a scoped request must keep
         # only the requested one so a regenerate never clobbers other outputs.
-        outputs, _ = generate_core_outputs(
+        outputs, _, _ = generate_core_outputs(
             make_profile(),
             ["resumeBullets"],
             completion_fn=fake_completion(all_outputs_json()),
@@ -104,7 +104,7 @@ class OutputGeneratorTests(unittest.TestCase):
             }
         )
 
-        topics, tokens = generate_interview_prep(
+        topics, tokens, _ = generate_interview_prep(
             make_profile(), completion_fn=fake_completion(content)
         )
 
@@ -125,7 +125,7 @@ class OutputGeneratorTests(unittest.TestCase):
         # so the caller can merge without disturbing the other outputs.
         content = json.dumps({"portfolioBlurb": "A tighter, less fluffy blurb."})
 
-        outputs, tokens = revise_output(
+        outputs, tokens, _ = revise_output(
             make_profile(),
             "portfolioBlurb",
             current_text="An old, fluffy blurb.",
@@ -142,7 +142,7 @@ class OutputGeneratorTests(unittest.TestCase):
         # With no instruction, revision is driven purely by the current draft.
         content = json.dumps({"resumeBullets": ["Tightened bullet one"]})
 
-        outputs, _ = revise_output(
+        outputs, _, _ = revise_output(
             make_profile(),
             "resumeBullets",
             current_text="Wordy bullet one",

@@ -90,6 +90,9 @@ htmlcov/
 *.sqlite
 *.sqlite3
 
+# Persistent lifetime token-usage ledger (Phase 12 stopgap; local state only)
+backend/data/
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache

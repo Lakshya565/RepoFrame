@@ -14,6 +14,10 @@ from app.schemas.profile import (
     ProfileEvidence,
     ProjectProfile,
 )
+from app.schemas.usage import UsageTotals
+from app.schemas.verify import VerifyClaimsRequest, VerifyClaimsResponse
+from app.services import usage_store
+from app.services.claim_verifier import verify_claims
 from app.services.file_content_service import collect_file_evidence
 from app.services.file_ranker import rank_important_files
 from app.services.github_service import (
@@ -79,9 +83,9 @@ def generate_profile(request: GenerateProfileRequest) -> GenerateProfileResponse
         )
 
         # Prompt construction, budget enforcement, and the OpenAI call all happen
-        # inside the generator; it returns the validated profile and the pre-call
-        # token estimate used for cost transparency.
-        profile, estimated_input_tokens = generate_project_profile(
+        # inside the generator; it returns the validated profile, the pre-call
+        # token estimate, and the real post-call token usage.
+        profile, estimated_input_tokens, usage = generate_project_profile(
             metadata,
             technologies,
             evidence,
@@ -97,6 +101,10 @@ def generate_profile(request: GenerateProfileRequest) -> GenerateProfileResponse
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except ProfileGenerationError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    # Record the real usage to the lifetime ledger (safe: a ledger failure never
+    # discards the completed generation).
+    usage_store.record(usage)
 
     return GenerateProfileResponse(
         owner=parsed_repo.owner,
@@ -124,6 +132,7 @@ def generate_profile(request: GenerateProfileRequest) -> GenerateProfileResponse
         model=OPENAI_MODEL,
         estimated_input_tokens=estimated_input_tokens,
         evidence_file_count=len(evidence.selected_files),
+        usage=UsageTotals.from_usage(usage),
     )
 
 
@@ -135,16 +144,19 @@ def generate_profile(request: GenerateProfileRequest) -> GenerateProfileResponse
 @router.post("/outputs", response_model=GenerateOutputsResponse)
 def generate_outputs(request: GenerateOutputsRequest) -> GenerateOutputsResponse:
     try:
-        outputs, estimated_input_tokens = generate_core_outputs(
+        outputs, estimated_input_tokens, usage = generate_core_outputs(
             request.profile, request.sections, request.guidance
         )
     except LLMError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
+    usage_store.record(usage)
+
     return GenerateOutputsResponse(
         outputs=outputs,
         model=OPENAI_MODEL,
         estimated_input_tokens=estimated_input_tokens,
+        usage=UsageTotals.from_usage(usage),
     )
 
 
@@ -155,7 +167,7 @@ def generate_outputs(request: GenerateOutputsRequest) -> GenerateOutputsResponse
 @router.post("/outputs/revise", response_model=GenerateOutputsResponse)
 def revise_output_endpoint(request: ReviseOutputRequest) -> GenerateOutputsResponse:
     try:
-        outputs, estimated_input_tokens = revise_output(
+        outputs, estimated_input_tokens, usage = revise_output(
             request.profile,
             request.section,
             request.current_text,
@@ -164,10 +176,13 @@ def revise_output_endpoint(request: ReviseOutputRequest) -> GenerateOutputsRespo
     except LLMError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
+    usage_store.record(usage)
+
     return GenerateOutputsResponse(
         outputs=outputs,
         model=OPENAI_MODEL,
         estimated_input_tokens=estimated_input_tokens,
+        usage=UsageTotals.from_usage(usage),
     )
 
 
@@ -179,14 +194,64 @@ def generate_interview_prep_endpoint(
     request: GenerateInterviewPrepRequest,
 ) -> GenerateInterviewPrepResponse:
     try:
-        topics, estimated_input_tokens = generate_interview_prep(
+        topics, estimated_input_tokens, usage = generate_interview_prep(
             request.profile, request.guidance
         )
     except LLMError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
+    usage_store.record(usage)
+
     return GenerateInterviewPrepResponse(
         topics=topics,
         model=OPENAI_MODEL,
         estimated_input_tokens=estimated_input_tokens,
+        usage=UsageTotals.from_usage(usage),
+    )
+
+
+# Phase 12 agentic claim verification. Re-runs the deterministic pipeline (parse ->
+# metadata -> tree -> rank -> bounded evidence) to rebuild the same already-selected
+# evidence bundle the profile was grounded in, then hands it plus the generated
+# outputs to the bounded verification agent. Like interview prep this is opt-in: the
+# frontend calls it only when the user clicks "Verify claims", so it never spends
+# tokens in the default flow. The agent loop, tools, and caps live in claim_verifier.
+@router.post("/verify", response_model=VerifyClaimsResponse)
+def verify_claims_endpoint(request: VerifyClaimsRequest) -> VerifyClaimsResponse:
+    try:
+        parsed_repo = parse_github_repo_url(request.repo_url)
+        metadata = fetch_repo_metadata(parsed_repo.owner, parsed_repo.repo)
+        tree = fetch_repo_tree(
+            parsed_repo.owner,
+            parsed_repo.repo,
+            metadata.default_branch,
+        )
+        ranked_files = rank_important_files(tree.files)
+        evidence = collect_file_evidence(
+            parsed_repo.owner,
+            parsed_repo.repo,
+            metadata.default_branch,
+            ranked_files,
+        )
+        verifications, estimated_input_tokens, usage = verify_claims(
+            evidence, request.outputs, request.user_context, request.sections
+        )
+    except RepoUrlParseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except GitHubMetadataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except GitHubTreeError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except GitHubFileContentError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except LLMError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    usage_store.record(usage)
+
+    return VerifyClaimsResponse(
+        verifications=verifications,
+        model=OPENAI_MODEL,
+        estimated_input_tokens=estimated_input_tokens,
+        usage=UsageTotals.from_usage(usage),
     )

@@ -93,7 +93,7 @@ def exploding_completion(system_prompt: str, user_prompt: str) -> CompletionResu
 
 class ProfileGeneratorTests(unittest.TestCase):
     def test_valid_response_parses_into_profile(self) -> None:
-        profile, tokens = generate_project_profile(
+        profile, tokens, _ = generate_project_profile(
             make_metadata(),
             make_technologies(),
             make_evidence(),

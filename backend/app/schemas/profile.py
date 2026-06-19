@@ -2,6 +2,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
+from app.schemas.usage import UsageTotals
+
 
 # User-provided questionnaire answers (Phase 9). Mirrors the frontend UserContext
 # shape so the questionnaire can be posted straight through. Every field is
@@ -62,9 +64,9 @@ class ProjectProfile(BaseModel):
     evidence: list[ProfileEvidence]
 
 
-# Endpoint response: the validated profile wrapped with repo identity and minimal
-# generation metadata. The metadata exists for cost transparency (which model ran
-# and the pre-call input-size estimate); full usage tracking is Phase 13.
+# Endpoint response: the validated profile wrapped with repo identity and
+# generation metadata. estimatedInputTokens is the pre-call size estimate; usage
+# is the real post-call token usage (Phase 12) for the per-analysis meter.
 class GenerateProfileResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -76,3 +78,4 @@ class GenerateProfileResponse(BaseModel):
     model: str
     estimated_input_tokens: int = Field(alias="estimatedInputTokens")
     evidence_file_count: int = Field(alias="evidenceFileCount")
+    usage: UsageTotals

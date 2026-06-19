@@ -4,7 +4,13 @@ from pydantic import ValidationError
 
 from app.schemas.outputs import GeneratedOutputs, InterviewPrep, InterviewTopic
 from app.schemas.profile import ProjectProfile
-from app.services.llm_client import CompletionFn, LLMError, complete, openai_completion
+from app.services.llm_client import (
+    CompletionFn,
+    LLMError,
+    TokenUsage,
+    complete,
+    openai_completion,
+)
 
 # Phase 11 core-output and interview-prep generation. Both consume the structured
 # ProjectProfile from Phase 10 (not raw repo evidence), which keeps prompts small
@@ -203,17 +209,17 @@ def _normalize_sections(sections: list[str] | None) -> list[str]:
 # Generates the requested core outputs from a project profile in one model call.
 # Validates the JSON against GeneratedOutputs, then returns only the requested
 # sections so a scoped regenerate never clobbers untouched outputs. Returns the
-# outputs plus the pre-call token estimate for cost transparency.
+# outputs, the pre-call token estimate, and the real token usage for cost tracking.
 def generate_core_outputs(
     profile: ProjectProfile,
     sections: list[str] | None = None,
     guidance: str = "",
     completion_fn: CompletionFn = openai_completion,
-) -> tuple[GeneratedOutputs, int]:
+) -> tuple[GeneratedOutputs, int, TokenUsage]:
     requested = _normalize_sections(sections)
     user_prompt = _build_outputs_prompt(profile, requested, guidance)
 
-    content, estimated_tokens = complete(
+    content, estimated_tokens, usage = complete(
         _OUTPUTS_SYSTEM_PROMPT, user_prompt, completion_fn
     )
 
@@ -231,7 +237,7 @@ def generate_core_outputs(
         _SECTION_ATTR[section]: getattr(outputs, _SECTION_ATTR[section])
         for section in requested
     }
-    return GeneratedOutputs(**filtered), estimated_tokens
+    return GeneratedOutputs(**filtered), estimated_tokens, usage
 
 
 # Generates technical interview talking points from a project profile. Called only
@@ -241,12 +247,12 @@ def generate_interview_prep(
     profile: ProjectProfile,
     guidance: str = "",
     completion_fn: CompletionFn = openai_completion,
-) -> tuple[list[InterviewTopic], int]:
+) -> tuple[list[InterviewTopic], int, TokenUsage]:
     user_prompt = _with_guidance(
         "PROJECT PROFILE\n" + _profile_to_prompt(profile), guidance
     )
 
-    content, estimated_tokens = complete(
+    content, estimated_tokens, usage = complete(
         _INTERVIEW_SYSTEM_PROMPT, user_prompt, completion_fn
     )
 
@@ -259,7 +265,7 @@ def generate_interview_prep(
     except (json.JSONDecodeError, ValueError) as exc:
         raise LLMError("OpenAI response was not valid JSON.", 502) from exc
 
-    return prep.topics, estimated_tokens
+    return prep.topics, estimated_tokens, usage
 
 
 # Revises one existing output section from the user's current draft plus an
@@ -273,10 +279,10 @@ def revise_output(
     current_text: str,
     instruction: str = "",
     completion_fn: CompletionFn = openai_completion,
-) -> tuple[GeneratedOutputs, int]:
+) -> tuple[GeneratedOutputs, int, TokenUsage]:
     user_prompt = _build_revise_prompt(profile, section, current_text, instruction)
 
-    content, estimated_tokens = complete(
+    content, estimated_tokens, usage = complete(
         _REVISE_SYSTEM_PROMPT, user_prompt, completion_fn
     )
 
@@ -292,4 +298,4 @@ def revise_output(
     # Return only the revised section, mirroring the scoped-generate behavior so
     # the caller can merge it without touching the other outputs.
     attr = _SECTION_ATTR[section]
-    return GeneratedOutputs(**{attr: getattr(outputs, attr)}), estimated_tokens
+    return GeneratedOutputs(**{attr: getattr(outputs, attr)}), estimated_tokens, usage

@@ -317,52 +317,99 @@ In the frontend, display outputs in clean tabs with copy buttons. Add an Evidenc
 
 ---
 
-# Phase 12: Agentic Claim Verification
+# Phase 12: Agentic Claim Verification + Token Metering
+
+> Full working plan: see PHASE_12_PLAN.md.
 
 ## Goal
 
-Add a bounded agentic workflow that verifies generated claims against repo evidence.
+Add a bounded agentic workflow that verifies generated claims against repo
+evidence, and make token spend visible (per-analysis and lifetime) before the
+agentic loop multiplies it. The token-usage slice of Phase 13 is intentionally
+pulled forward here (see Phase 13 note below).
 
 ## Build
 
 ```text
-Claim Verification Agent
-Supported / partially supported / needs confirmation / unsupported labels
-Evidence search over selected repo evidence
+--- Token metering (pulled forward from Phase 13) ---
+Capture real usage (prompt/completion/reasoning/total) at the LLM chokepoint
+Per-analysis usage total returned by every generate + verify endpoint
+Per-repo session token meter in the frontend, with per-step breakdown
+Lifetime persistent token ledger: JSON file + GET /api/usage/total + UI badge
+(No dollar/cost estimate — explicitly descoped)
+
+--- Agentic claim verification ---
+Bounded tool-calling agent (loop with hard caps, not single-pass)
+Tools scoped to already-selected evidence only: search_evidence, read_evidence_file
+Supported / partially_supported / needs_user_confirmation / unsupported labels
 User-context checks
 Structured verification JSON
-Frontend claim status display
+Opt-in only ("Verify claims" button; never auto-runs)
+Frontend claim status display near the EvidencePanel
 ```
 
 ## Codex Prompt
 
 ```text
-Implement a bounded agentic claim-verification workflow for RepoFrame. The goal is to verify generated project claims against selected repo evidence and user-provided context.
+Implement Phase 12 in this order (see PHASE_12_PLAN.md for full detail):
 
-The agent should review generated claims from resume bullets, README intro, portfolio blurb, and LinkedIn-style description. For each claim, return a structured verification result:
-- claim
-- status: supported, partially_supported, needs_user_confirmation, or unsupported
-- supportingEvidence
-- explanation
-- suggestedRevision if needed
+1. Token-metering foundation. Capture real OpenAI usage at the single LLM
+   chokepoint (llm_client). Add prompt/completion/reasoning/total token fields to
+   CompletionResult, populated from response.usage. Keep llm_client side-effect
+   free (it reports usage, never writes files) so the injected-fake tests stay
+   offline and zero-token.
+
+2. Per-analysis usage meter. Aggregate usage across all calls in one analysis and
+   return it from every generate + verify endpoint. Show a running per-repo
+   session total in the frontend with a per-step breakdown.
+
+3. Lifetime persistent ledger. Add a usage_store service backed by a single JSON
+   file (atomic writes, configurable path), incremented once per analysis at the
+   route layer (not in llm_client). Add GET /api/usage/total and a small lifetime
+   badge in the UI. Gitignore the data file. Document it as a stopgap to be
+   replaced by Supabase in Phase 15 behind the same interface. No dollar cost.
+
+4. Bounded agentic claim verification. Add POST /api/generate/verify taking the
+   repo URL, user context, and the generated outputs. Re-run the deterministic
+   pipeline to rebuild the already-selected evidence bundle, then run a bounded
+   tool-calling agent over it. The agent reviews generated claims from resume
+   bullets, README intro, portfolio blurb, and LinkedIn-style description. For
+   each claim return: claim, status (supported, partially_supported,
+   needs_user_confirmation, unsupported), supportingEvidence, explanation,
+   suggestedRevision if needed.
 
 Keep the agent bounded and safe:
 - it may only use already-selected repo evidence and user context
-- it should not fetch unlimited new files
-- it should not run code from the repo
-- it should return structured JSON
-- it should respect the existing token/input limits
+- tools (search_evidence, read_evidence_file) query in-memory evidence only;
+  it must not fetch new files or run repo code
+- hard caps on iterations and tool calls (config), plus the existing prompt
+  budget gate per call
+- structured JSON output
+- verification is opt-in: it runs only on an explicit "Verify claims" button and
+  never as part of the default/Generate-all flow, so it can't spend tokens
+  without a deliberate click
 
-Display claim verification results in the frontend, ideally near the EvidencePanel or under each generated output. This should make RepoFrame feel like an agentic repo analysis tool, not just a generic AI writing app.
+Add a new tool-calling path in the LLM layer (complete_with_tools) that accepts a
+growing message list + tool schemas, captures usage on every iteration, and stays
+injectable so the loop is tested offline with a scripted fake (call -> tool ->
+final). Display claim verification results near the EvidencePanel / under each
+generated output. This should make RepoFrame feel like an agentic repo analysis
+tool, not just a generic AI writing app.
 ```
 
 ---
 
-# Phase 13: Usage Metrics and Cost Tracking
+# Phase 13: Usage Metrics and System Metrics
+
+> Note: token usage tracking (real per-analysis usage + a persistent lifetime
+> token ledger) was pulled forward into Phase 12. Phase 13 now covers the
+> remaining non-token metrics. The dollar/cost estimate was descoped entirely.
 
 ## Goal
 
-Track real numbers for deployment, resume bullets, and cost control.
+Track the remaining real numbers for deployment, resume bullets, and debugging —
+the operational and claim-quality metrics not already captured by Phase 12's
+token meter.
 
 ## Build
 
@@ -373,19 +420,27 @@ Files selected
 Claims generated
 Claims verified
 Supported vs unsupported claims
-Estimated input/output tokens
-Estimated cost per analysis
 LLM latency
 Backend latency
 Error counts
+(Token usage already handled in Phase 12; no dollar cost estimate)
 ```
 
 ## Codex Prompt
 
 ```text
-Add basic usage and system metrics tracking. Track useful metrics such as repos analyzed, total files scanned, selected evidence files, generated claims, verified claims, supported/unsupported claim counts, estimated token usage, estimated cost per analysis, LLM latency, backend latency, and error counts.
+Add basic usage and system metrics tracking, building on the token metering
+already implemented in Phase 12 (do not re-implement token capture). Track the
+remaining metrics: repos analyzed, total files scanned, selected evidence files,
+generated claims, verified claims, supported/unsupported claim counts, LLM
+latency, backend latency, and error counts.
 
-For now, keep the implementation simple. Store metrics in memory, local logs, or a lightweight structure that can later be moved to Supabase. Do not add a complex analytics dashboard yet. Add a simple backend endpoint or developer-only view that exposes recent metrics for debugging and future resume/project reporting.
+For now, keep the implementation simple. Store metrics in memory, local logs, or a
+lightweight structure that can later be moved to Supabase (mirroring the Phase 12
+usage_store stopgap approach). Do not add a complex analytics dashboard yet, and
+do not add a dollar cost estimate. Add a simple backend endpoint or developer-only
+view that exposes recent metrics for debugging and future resume/project
+reporting.
 ```
 
 ---
