@@ -249,13 +249,17 @@ Rough sequencing, smallest-risk-first, so each step is independently verifiable:
 ## 9. Open questions for you
 
 1. Light, dark, or both (with a toggle)?
+toggle
 2. Is the analysis page staying single-page stacked, or moving to a stepped /
    multi-section layout?
+   stepped/multisection layout
 3. Which example repos do you want featured on the landing page?
+we can figure that out later
 4. Should the metrics panel ship in this phase, or be the very last thing (it's
    isolated either way)?
+   metrics panel ship in this phase
 5. Any hard "don't touch" components that are already how you want them?
-
+not really, just keep all backend components working as intended.
 ---
 
 *When sections 4–6 are filled and the open questions answered, I'll fold the
