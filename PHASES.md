@@ -472,7 +472,7 @@ Developer metrics panel (floating button → metrics drawer)
 ## Codex Prompt
 
 ```text
-Polish the RepoFrame MVP. Improve loading, error, and empty states across the frontend. Make the UI feel like a clean developer tool, not a generic AI app. Add example repo cards on the landing page, improve spacing and typography, and make the analysis flow easy to demo in under 60 seconds.
+Polish the RepoFrame MVP. Improve loading, error, and empty states across the frontend. Make the UI feel like a clean developer tool, not a generic AI app. Add example repo cards on the landing page, improve spacing and typography, and make the analysis flow easy to demo in under 60 seconds. Add a mobile layout so the website is viewable on mobile devices as well as computers(essentially, the design should be dynamically resizable).
 
 Add subtle animations only where they improve clarity, such as loading states, tab transitions, collapsible evidence cards, or analysis progress steps. Do not add distracting animations or major new features.
 ```
