@@ -345,6 +345,32 @@ export async function fetchLifetimeUsage(): Promise<LifetimeUsage> {
   return parseResponse(response, "RepoFrame could not fetch usage totals.");
 }
 
+// ── Phase 13: operational metrics (GET /api/metrics) ─────────────────────────
+// In-memory counters + latency aggregates, reset on backend restart. Keys are
+// snake_case (the backend MetricsResponse is unaliased) and dict-shaped so new
+// counters/categories can appear without breaking this client. Read-only — the
+// developer metrics drawer only displays these; it never records anything.
+
+// Latency aggregate for one category (llm, backend), in milliseconds.
+export type LatencyMetric = {
+  count: number;
+  avg_ms: number;
+  max_ms: number;
+};
+
+export type MetricsResponse = {
+  counters: Record<string, number>;
+  latency: Record<string, LatencyMetric>;
+};
+
+// Fetches the developer metrics snapshot. Spends no tokens; the backend stays the
+// single source of truth and this only displays what it has already recorded.
+export async function fetchMetrics(): Promise<MetricsResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/metrics`);
+
+  return parseResponse(response, "RepoFrame could not fetch metrics.");
+}
+
 // Posts an arbitrary JSON body and returns typed JSON or a useful Error. The
 // generation endpoints take richer bodies than the shared { repoUrl } shape, so
 // they use this instead of postRepoRequest.

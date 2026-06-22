@@ -1,9 +1,9 @@
 # Phase 14 Plan: Polish the MVP (UI)
 
-> **Status: DRAFT / living document.** This is a working plan we fill in together
-> before any code is written. Sections marked **[TBD — user input]** are waiting on
-> you to add your specific UI ideas, the libraries you want me to use/consult, and
-> the UI skill you want installed. Nothing here is final until we agree on it.
+> **Status: IN PROGRESS.** Direction is locked: a **green + near-black** palette
+> (§4a) with **animation as the primary pillar** (§4b). Foundation and the landing
+> page are built as the design-language proof point; remaining surfaces follow the
+> task breakdown in §7. Still a living doc — adjust as we go.
 
 ---
 
@@ -176,7 +176,75 @@ Why AI loves it: Colored indicator dots are everywhere in developer tools and ad
 Just avoid these all, and we're good. 
 ---
 
-## 5. [TBD — user input] Libraries to use / consult
+## 4a. Visual direction (locked in 2026-06-22)
+
+- **Palette: green + near-black.** Light mode uses a deep green primary/CTA, soft
+  light-green tints for secondary/accent surfaces, a faint green-tinted off-white
+  page, and near-black ink. Dark mode is a near-black base (`#0a0f0d`) with a
+  brighter — but deliberately **non-neon** — green accent. A single brand green
+  drives links, active indicators, and the primary CTA. All values live in
+  `frontend/src/app/globals.css`.
+- **Inspiration:** the Positivus design language (green-on-black, bold, graphic,
+  numbered process steps) — reference: https://positivus-prpanto.vercel.app . We
+  adopt its **spirit** (green + black, confident, graphic) and reject its AI tells
+  (near-neon lime, cards-inside-cards, decorative illustration clutter).
+- Still avoiding all seven "AI-generated" tells from §4. Status hues
+  (amber / blue / red + a distinct success green) appear **only** on
+  claim-verification badges, with labels — never decorative dots or rainbow tabs.
+- **Type:** IBM Plex Sans (UI/body) + JetBrains Mono (code, paths, data).
+
+> **Deferred — copy tone:** current hero/landing wording reads too "B2B SaaS
+> pitch." Revisit the actual prose (hero, steps, section labels) in the §9 polish
+> pass to sound less like a sales page. Visual direction is unaffected.
+
+## 4b. Motion & animation — THE PRIMARY PILLAR
+
+> Per the user: animation quality and "the way it opens up" matter most — it needs
+> to look impressive and graphic. Motion is treated as a first-class concern woven
+> through every surface, **not** a final polish pass.
+
+**Quality bar:** confident, graphic, and fast — never bouncy, laggy, or
+decorative. Motion should always express cause→effect (something opening,
+arriving, or progressing), never move just to move.
+
+**Engine & rules:**
+- Library: **Motion** (`motion/react`). Animate **transform/opacity only** (GPU
+  friendly); never width/height/top/left except measured collapsibles.
+- One shared rhythm so the whole app feels authored by one hand: expo-out easing
+  `[0.16, 1, 0.3, 1]`, ~0.6s entrances, ~0.08s stagger. Centralized in the
+  `components/motion/*` kit (`Reveal`, `GrowLine` built; more to come).
+- **`prefers-reduced-motion` is mandatory** — the reduced path renders every
+  element in its final state (no transform/opacity tween). Animations are
+  interruptible and never block input.
+- Server components stay server; animation lives in small client wrappers that
+  pages compose.
+
+**The "opening" experience, per surface:**
+- **Landing hero** — staged cascade (eyebrow + drawn-in green rule → headline →
+  subhead → CTA); steps reveal on scroll. _(baseline DONE)_
+- **Route transition** — analysis page enters with a directional/shared-element
+  transition from the landing CTA (forward = up/left) via `AnimatePresence`.
+- **Analysis flow (centerpiece)** — the stepped pipeline **builds itself**: each
+  stage (metadata → tree → ranking → tech stack → evidence) animates in as it
+  completes, with a thin progress line advancing. This is the main "graphic"
+  moment.
+- **Generated outputs** — tab content crossfades; result cards reveal-stagger.
+- **Evidence / claim verification** — collapsibles expand with measured
+  height+opacity; status badges land with a subtle scale (0.96→1); the verifying
+  state shows a live, non-blocking indicator.
+- **Metrics drawer** — slides in from the right over a scrim; key numbers
+  count up on open.
+- **Micro-interactions** — button/card press scale (~0.97→1), hover transitions
+  150–200ms.
+
+**Performance budget:** lazy/dynamic-import heavy animated surfaces; keep
+per-frame work to transform/opacity; verify no CLS; Motion is tree-shaken (import
+only what's used). The user's constraint — "as long as it doesn't significantly
+increase latency and overhead" — gates every motion addition.
+
+---
+
+## 5. Libraries to use / consult
 
 > A clean slate today (only Next + React + Tailwind). List anything you want me to
 > use, and I'll consult their current docs before coding. Candidate categories so
@@ -192,6 +260,12 @@ Just avoid these all, and we're good.
 
 Motion is good for animation, as long as it doesn't significantly increase latency and overhead. lucide-react is good for icons, yes. Shadcn is good for component primitives.
 
+**Status (installed):** `motion`, `lucide-react`, `next-themes`,
+`class-variance-authority`, `clsx`, `tailwind-merge` (+ `tw-animate-css` dev).
+shadcn is wired manually (`components.json` + `lib/utils.ts` `cn()`), so
+`npx shadcn@latest add <component>` works for pulling in more primitives, and the
+hand-written `Button`/`Card`/`Badge`/`Input` follow shadcn conventions.
+
 ---
 
 ## 6. [TBD — user input] UI skill to install
@@ -204,24 +278,30 @@ Added the UI UX pro max skill for you to use.
 
 ---
 
-## 7. Proposed task breakdown (draft — reorder once 4–6 are filled)
+## 7. Task breakdown (animation integrated per surface, not bolted on last)
 
-Rough sequencing, smallest-risk-first, so each step is independently verifiable:
+Smallest-risk-first, each step independently verifiable (`tsc` + `lint`). Every UI
+step carries its own motion work per §4b rather than deferring it.
 
-1. **Foundation:** design tokens (colors, spacing, typography) + shared primitives
-   (button, card, badge) so the rest is consistent. Decide light/dark here.
-2. **State coverage:** unify loading / error / empty / disabled states across
-   existing flows (intake → analysis → generation → verify).
-3. **Landing page:** hero, "how it works," example repo cards, product framing.
-4. **Analysis flow layout:** restructure the stacked cards into the agreed layout;
-   add progress/step affordances.
-5. **Evidence + claim verification redesign:** the two highest-value display
-   surfaces; collapsibles, badges, readability.
-6. **Developer metrics panel** (section 3a) — isolated, read-only, env-gated.
-7. **Responsive/mobile pass:** every surface dynamically resizable.
-8. **Subtle animation pass:** clarity-only transitions, last so motion sits on a
-   stable layout.
-9. **README screenshots + docs:** update once the UI is settled.
+1. **Foundation** — green/black tokens, fonts, theme toggle, primitives, and the
+   `motion/*` reveal kit. _(DONE)_
+2. **Landing page** — staged hero cascade + scroll reveals on the new palette.
+   _(DONE — the design-language proof point)_
+3. **State coverage** — shared loading / error / empty / disabled primitives
+   (skeletons, error card, empty state) with built-in entrance motion, reused by
+   every flow below.
+4. **Analysis flow (centerpiece)** — stepped/multi-section layout where the
+   pipeline **builds itself** with an advancing progress line as each stage
+   lands. Highest-impact motion moment.
+5. **Generated outputs** — tabs with crossfade + reveal-staggered result cards.
+6. **Evidence + claim verification** — collapsibles (measured expand), status
+   badges that land with a subtle scale, live non-blocking verifying state.
+7. **Developer metrics panel** — floating button → right-side drawer over a scrim,
+   numbers counting up; read-only, env-gated (§3a).
+8. **Route transitions + responsive pass** — `AnimatePresence` page transitions;
+   every surface dynamically resizable on 375 / 768 / 1024 / 1440.
+9. **Motion QA + docs** — reduced-motion audit, CLS/perf check, README
+   screenshots; delete this plan and mark Phase 14 done in PHASES.md.
 
 ---
 

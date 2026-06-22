@@ -1,10 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { Loader2 } from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { ClaimVerificationPanel } from "@/components/claim-verification-panel";
 import { EvidencePanel } from "@/components/evidence-panel";
 import { GeneratedOutputsCard } from "@/components/generated-outputs-card";
-import { TokenUsagePanel } from "@/components/token-usage-panel";
 import { UserContextForm } from "@/components/user-context-form";
 import {
   EMPTY_OUTPUTS,
@@ -34,6 +37,12 @@ import {
 
 type ProjectWriteupSectionProps = {
   repoUrl: string;
+  // Token-usage state is lifted to the analysis workspace so the developer panel
+  // can show it alongside the GitHub rate limit. This component only reports each
+  // call's usage up and signals when a generation finishes (so the lifetime total
+  // refetches); it no longer renders the token meter itself.
+  onAddUsage: (usage: UsageTotals) => void;
+  onGenerationComplete: () => void;
 };
 
 // Identifies the single generation task allowed to run at a time. The presence
@@ -63,27 +72,9 @@ const SECTION_VERIFY_LABELS: { section: OutputSection; label: string }[] = [
   { section: "linkedinDescription", label: "LinkedIn" },
 ];
 
-// A zero starting point for the per-session usage meter.
-const EMPTY_USAGE_TOTALS: UsageTotals = {
-  promptTokens: 0,
-  completionTokens: 0,
-  reasoningTokens: 0,
-  totalTokens: 0,
-};
-
 // Reads an Error message with a fallback.
 function messageOf(caught: unknown, fallback: string): string {
   return caught instanceof Error ? caught.message : fallback;
-}
-
-// Sums two usage totals field by field, used to accumulate the session meter.
-function addTotals(a: UsageTotals, b: UsageTotals): UsageTotals {
-  return {
-    promptTokens: a.promptTokens + b.promptTokens,
-    completionTokens: a.completionTokens + b.completionTokens,
-    reasoningTokens: a.reasoningTokens + b.reasoningTokens,
-    totalTokens: a.totalTokens + b.totalTokens,
-  };
 }
 
 // Owns the questionnaire answers (lifted from the form), the generated profile,
@@ -102,7 +93,11 @@ function addTotals(a: UsageTotals, b: UsageTotals): UsageTotals {
 //   4. Every call's real token usage is accumulated into a per-session meter, and
 //      the persistent lifetime total is refreshed after each call (Phase 12).
 // Nothing generates on load — every call is an explicit button press.
-export function ProjectWriteupSection({ repoUrl }: ProjectWriteupSectionProps) {
+export function ProjectWriteupSection({
+  repoUrl,
+  onAddUsage,
+  onGenerationComplete,
+}: ProjectWriteupSectionProps) {
   const [context, setContext] = useState<UserContext>(EMPTY_USER_CONTEXT);
 
   const [profile, setProfile] = useState<ProjectProfileData | null>(null);
@@ -125,25 +120,15 @@ export function ProjectWriteupSection({ repoUrl }: ProjectWriteupSectionProps) {
   // Preemptive instruction applied to everything produced by "Generate all".
   const [allGuidance, setAllGuidance] = useState("");
 
-  // Token spend accumulated across this session's calls, plus a counter that is
-  // bumped after each call so the lifetime total re-fetches.
-  const [sessionUsage, setSessionUsage] =
-    useState<UsageTotals>(EMPTY_USAGE_TOTALS);
-  const [usageRefresh, setUsageRefresh] = useState(0);
-
   const [busyTask, setBusyTask] = useState<GenerationTask | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Adds one call's real usage to the running session meter.
-  function addUsage(usage: UsageTotals) {
-    setSessionUsage((current) => addTotals(current, usage));
-  }
+  // Reports one call's real usage up to the workspace's session meter.
+  const addUsage = onAddUsage;
 
-  // Signals the usage panel to refetch the persistent lifetime total (the backend
-  // ledger was just updated by a completed call).
-  function refreshLifetime() {
-    setUsageRefresh((count) => count + 1);
-  }
+  // Signals the workspace that a generation finished, so the lifetime total
+  // refetches (the backend ledger was just updated by the completed call).
+  const refreshLifetime = onGenerationComplete;
 
   // Returns the profile, regenerating it when the questionnaire changed since it
   // was built (so grounding stays current) and reusing it otherwise. A fresh
@@ -338,35 +323,29 @@ export function ProjectWriteupSection({ repoUrl }: ProjectWriteupSectionProps) {
     <div className="space-y-6">
       <UserContextForm context={context} onContextChange={setContext} />
 
-      <article className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">
-          Generated outputs
+      <Card className="p-6">
+        <h3 className="text-lg font-semibold">Turn this repo into a writeup</h3>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          Generate each piece on its own from the tabs below, or generate
+          everything at once. Only one runs at a time.
         </p>
-        <h2 className="mt-3 text-2xl font-semibold">
-          Turn this repo into a writeup
-        </h2>
-        <p className="mt-3 text-base leading-7 text-slate-600">
-          Generate each output on its own from the tabs below, or generate
-          everything at once. Each generation calls the OpenAI API; only one runs
-          at a time.
-        </p>
-        <p className="mt-2 text-sm leading-6 text-slate-500">
-          Heads up: the first generation builds the project profile, so it can take
-          around 20 seconds. Later generations reuse the profile and are faster.
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          The first generation takes a little longer (around 20 seconds) while we
+          read and understand your project. After that, it&apos;s faster.
         </p>
 
         <div className="mt-5">
           <label
-            className="text-sm font-medium text-slate-900"
+            className="text-sm font-medium"
             htmlFor="generate-all-guidance"
           >
             Instructions for the model (optional)
           </label>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-muted-foreground">
             Added to the prompt for everything produced by Generate all.
           </p>
-          <textarea
-            className="mt-2 min-h-16 w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm leading-6 text-slate-950 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-50"
+          <Textarea
+            className="mt-2 resize-y"
             disabled={busy}
             id="generate-all-guidance"
             maxLength={INSTRUCTION_MAX_LENGTH}
@@ -374,24 +353,32 @@ export function ProjectWriteupSection({ repoUrl }: ProjectWriteupSectionProps) {
             placeholder="e.g. write for a backend role, keep everything concise"
             value={allGuidance}
           />
-          <div className="mt-1 text-right text-xs text-slate-400">
+          <div className="mt-1 text-right text-xs text-muted-foreground">
             {allGuidance.length}/{INSTRUCTION_MAX_LENGTH}
           </div>
         </div>
 
-        <button
-          className="mt-3 inline-flex min-h-11 items-center rounded-md bg-slate-950 px-5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+        <Button
+          variant="brand"
+          className="mt-3"
           disabled={busy}
           onClick={handleGenerateAll}
-          type="button"
         >
-          {busyTask?.kind === "all"
-            ? "Generating…"
-            : "Generate all (profile, outputs, interview prep)"}
-        </button>
+          {busyTask?.kind === "all" ? (
+            <>
+              <Loader2 className="animate-spin" />
+              Generating…
+            </>
+          ) : (
+            "Generate everything"
+          )}
+        </Button>
 
         {error ? (
-          <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <p
+            className="mt-4 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
+            role="alert"
+          >
             {error}
           </p>
         ) : null}
@@ -419,36 +406,40 @@ export function ProjectWriteupSection({ repoUrl }: ProjectWriteupSectionProps) {
               in); the per-tab buttons re-check a single tab. */}
           <div>
             <div className="flex flex-wrap gap-2">
-              <button
-                className="inline-flex min-h-11 items-center rounded-md border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-800 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              <Button
+                variant="outline"
                 disabled={busy || !hasAnyOutput}
                 onClick={() => handleVerifyClaims(null)}
-                type="button"
               >
-                {busyTask?.kind === "verify" && busyTask.section === null
-                  ? "Verifying…"
-                  : "Verify all claims"}
-              </button>
+                {busyTask?.kind === "verify" && busyTask.section === null ? (
+                  <>
+                    <Loader2 className="animate-spin" />
+                    Verifying…
+                  </>
+                ) : (
+                  "Verify all claims"
+                )}
+              </Button>
 
               {SECTION_VERIFY_LABELS.map(({ section, label }) =>
                 sectionHasContent(outputs, section) ? (
-                  <button
-                    className="inline-flex min-h-11 items-center rounded-md border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  <Button
+                    variant="outline"
+                    size="sm"
                     disabled={busy}
                     key={section}
                     onClick={() => handleVerifyClaims(section)}
-                    type="button"
                   >
                     {busyTask?.kind === "verify" && busyTask.section === section
                       ? "Verifying…"
                       : `Verify ${label}`}
-                  </button>
+                  </Button>
                 ) : null,
               )}
             </div>
-            <p className="mt-2 text-sm text-slate-500">
-              Checks each generated claim against the repository evidence and your
-              context. Uses the OpenAI API, so it runs only when you ask.
+            <p className="mt-2 text-sm text-muted-foreground">
+              We check each generated claim against your repository and the
+              context you gave us. This runs only when you ask.
             </p>
           </div>
 
@@ -456,13 +447,8 @@ export function ProjectWriteupSection({ repoUrl }: ProjectWriteupSectionProps) {
             loading={busyTask?.kind === "verify"}
             verifications={verifications}
           />
-
-          <TokenUsagePanel
-            refreshSignal={usageRefresh}
-            sessionUsage={sessionUsage}
-          />
         </div>
-      </article>
+      </Card>
     </div>
   );
 }

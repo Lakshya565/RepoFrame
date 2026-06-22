@@ -1,11 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+
 import {
   fetchRankedRepoFiles,
   type RepoFileRankingResponse,
   type RankedRepoFile,
 } from "@/lib/repo-api";
+import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState, ErrorState } from "@/components/states";
 
 type ImportantFilesCardProps = {
   repoUrl: string;
@@ -79,97 +83,53 @@ export function ImportantFilesCard({ repoUrl }: ImportantFilesCardProps) {
   }, [repoUrl]);
 
   if (isLoading) {
-    return <ImportantFilesLoadingCard />;
+    return (
+      <Card className="space-y-3 p-6">
+        <Skeleton className="h-5 w-1/3" />
+        <div className="grid gap-3 sm:grid-cols-3">
+          {[0, 1, 2].map((item) => (
+            <Skeleton key={item} className="h-[68px]" />
+          ))}
+        </div>
+        <Skeleton className="h-20" />
+        <Skeleton className="h-20" />
+      </Card>
+    );
   }
 
   if (error) {
     return (
-      <article className="rounded-lg border border-red-200 bg-white p-6 shadow-sm">
-        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-red-700">
-          File ranking unavailable
-        </p>
-        <h2 className="mt-3 text-2xl font-semibold">
-          RepoFrame could not rank important files.
-        </h2>
-        <p className="mt-3 text-base leading-7 text-slate-600">{error}</p>
-        <button
-          className="mt-5 inline-flex min-h-11 items-center rounded-md bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800"
-          onClick={loadRanking}
-          type="button"
-        >
-          Try again
-        </button>
-      </article>
+      <ErrorState
+        title="File ranking unavailable"
+        message={error}
+        onRetry={loadRanking}
+      />
     );
   }
 
   if (!ranking || ranking.rankedFiles.length === 0) {
     return (
-      <article className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">
-          Important files
-        </p>
-        <h2 className="mt-3 text-2xl font-semibold">No files ranked yet</h2>
-        <p className="mt-3 text-base leading-7 text-slate-600">
-          RepoFrame did not find rankable source, README, or configuration files
-          in this repository tree.
-        </p>
-      </article>
+      <EmptyState
+        title="No files ranked yet"
+        description="RepoFrame did not find rankable source, README, or configuration files in this repository tree."
+      />
     );
   }
 
   return (
-    <article className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">
-            Important files
-          </p>
-          <h2 className="mt-3 text-2xl font-semibold">
-            Top ranked evidence candidates
-          </h2>
-        </div>
-        <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
-          <p className="text-sm font-medium text-slate-500">Selected</p>
-          <p className="mt-1 font-mono text-lg font-semibold text-slate-950">
-            {numberFormatter.format(ranking.returnedFiles)}
-          </p>
-        </div>
-      </div>
+    <Card className="p-6">
+      <p className="text-sm text-muted-foreground">
+        We focused on {numberFormatter.format(ranking.returnedFiles)} of{" "}
+        {numberFormatter.format(ranking.totalFiles)} files to understand your
+        project.
+      </p>
 
-      <dl className="mt-6 grid gap-3 sm:grid-cols-3">
-        <StatItem label="Tree files" value={ranking.totalFiles} />
-        <StatItem label="Rankable" value={ranking.rankableFiles} />
-        <StatItem label="Default branch" value={ranking.defaultBranch} />
-      </dl>
-
-      <ol className="mt-6 space-y-3">
+      <ol className="mt-4 space-y-3">
         {ranking.rankedFiles.map((file) => (
           <ImportantFileRow file={file} key={file.path} />
         ))}
       </ol>
-    </article>
-  );
-}
-
-type StatItemProps = {
-  label: string;
-  value: number | string;
-};
-
-// Keeps ranking summary stats visually consistent with the existing repo tree
-// card while allowing both numeric counts and branch names.
-function StatItem({ label, value }: StatItemProps) {
-  const formattedValue =
-    typeof value === "number" ? numberFormatter.format(value) : value;
-
-  return (
-    <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
-      <dt className="text-sm font-medium text-slate-500">{label}</dt>
-      <dd className="mt-2 break-words font-mono text-slate-950">
-        {formattedValue}
-      </dd>
-    </div>
+    </Card>
   );
 }
 
@@ -177,45 +137,20 @@ type ImportantFileRowProps = {
   file: RankedRepoFile;
 };
 
-// Renders one ranked file with the backend score and reasons. Keeping reasons
-// visible makes the deterministic selection easier to audit before AI phases.
+// Renders one selected file with the human-readable reasons it was chosen. The
+// internal importance score is intentionally not shown — it reads as developer
+// detail rather than something a visitor needs.
 function ImportantFileRow({ file }: ImportantFileRowProps) {
   return (
-    <li className="rounded-md border border-slate-200 bg-slate-50 p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <p className="break-words font-mono text-sm font-semibold text-slate-950">
-          {file.path}
-        </p>
-        <span className="inline-flex w-fit shrink-0 items-center rounded-md border border-emerald-200 bg-emerald-50 px-3 py-1 font-mono text-sm font-semibold text-emerald-800">
-          {file.importanceScore}
-        </span>
-      </div>
-      <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
+    <li className="rounded-md border bg-muted/40 p-4">
+      <p className="break-words font-mono text-sm font-semibold text-foreground">
+        {file.path}
+      </p>
+      <ul className="mt-2 space-y-1.5 text-sm leading-6 text-muted-foreground">
         {file.reasons.map((reason) => (
           <li key={reason}>{reason}</li>
         ))}
       </ul>
     </li>
-  );
-}
-
-// Keeps the important-files panel stable while the backend fetches and scores
-// the repository tree.
-function ImportantFilesLoadingCard() {
-  return (
-    <article className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-      <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">
-        Ranking files
-      </p>
-      <div className="mt-4 space-y-3">
-        <div className="h-7 w-2/3 rounded-md bg-slate-200" />
-        <div className="h-4 w-full rounded-md bg-slate-100" />
-        <div className="h-4 w-5/6 rounded-md bg-slate-100" />
-      </div>
-      <div className="mt-6 space-y-3">
-        <div className="h-20 rounded-md border border-slate-200 bg-slate-50" />
-        <div className="h-20 rounded-md border border-slate-200 bg-slate-50" />
-      </div>
-    </article>
   );
 }

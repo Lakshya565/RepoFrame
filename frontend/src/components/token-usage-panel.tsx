@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+
 import {
   fetchLifetimeUsage,
   type LifetimeUsage,
   type UsageTotals,
 } from "@/lib/repo-api";
+import { Card } from "@/components/ui/card";
 
 const numberFormatter = new Intl.NumberFormat("en-US");
 
@@ -50,10 +52,8 @@ export function TokenUsagePanel({
   }, [refreshSignal]);
 
   return (
-    <article className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-      <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">
-        Token usage
-      </p>
+    <Card className="p-6">
+      <h3 className="text-base font-semibold">Token usage</h3>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <UsageStat
@@ -72,11 +72,11 @@ export function TokenUsagePanel({
         />
       </div>
 
-      <p className="mt-3 text-xs text-slate-500">
+      <p className="mt-3 text-xs text-muted-foreground">
         Counts tokens this RepoFrame backend has spent, not your whole OpenAI
         account — so it can differ from the OpenAI dashboard.
       </p>
-    </article>
+    </Card>
   );
 }
 
@@ -90,15 +90,17 @@ type UsageStatProps = {
 // count). Kept local since only this panel uses it.
 function UsageStat({ label, total, note }: UsageStatProps) {
   return (
-    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-      <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
+    <div className="rounded-md border bg-muted/40 p-3">
+      <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
         {label}
       </p>
-      <p className="mt-2 font-mono text-lg font-semibold text-slate-950">
+      <p className="mt-2 font-mono text-lg font-semibold text-foreground">
         {numberFormatter.format(total)}
-        <span className="ml-1 text-xs font-normal text-slate-500">tokens</span>
+        <span className="ml-1 text-xs font-normal text-muted-foreground">
+          tokens
+        </span>
       </p>
-      <p className="mt-1 text-xs text-slate-500">{note}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{note}</p>
     </div>
   );
 }

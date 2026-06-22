@@ -1,10 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+
 import {
   fetchGitHubRateLimit,
   type GitHubRateLimitResponse,
 } from "@/lib/repo-api";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const numberFormatter = new Intl.NumberFormat("en-US");
 const percentFormatter = new Intl.NumberFormat("en-US", {
@@ -93,34 +97,23 @@ export function GitHubRateLimitCard() {
 
   if (isLoading) {
     return (
-      <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">
-          GitHub API usage
-        </p>
-        <div className="mt-3 h-4 w-2/3 rounded-md bg-slate-100" />
-      </article>
+      <Card className="space-y-3 p-4">
+        <Skeleton className="h-4 w-1/3" />
+        <Skeleton className="h-4 w-2/3" />
+      </Card>
     );
   }
 
   if (error) {
     return (
-      <article className="rounded-lg border border-amber-200 bg-white p-4 shadow-sm">
+      <Card className="p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-700">
-              GitHub API usage
-            </p>
-            <p className="mt-2 text-sm text-slate-600">{error}</p>
-          </div>
-          <button
-            className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-300 px-3 text-sm font-semibold text-slate-800 transition hover:border-slate-400 hover:bg-slate-50"
-            onClick={loadRateLimit}
-            type="button"
-          >
+          <p className="text-sm text-muted-foreground">{error}</p>
+          <Button variant="outline" size="sm" onClick={loadRateLimit}>
             Refresh
-          </button>
+          </Button>
         </div>
-      </article>
+      </Card>
     );
   }
 
@@ -131,25 +124,16 @@ export function GitHubRateLimitCard() {
   const usedRatio = rateLimit.limit > 0 ? rateLimit.used / rateLimit.limit : 0;
 
   return (
-    <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+    <Card className="p-4">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">
-            GitHub API usage
-          </p>
-          <p className="mt-2 text-sm text-slate-600">
-            {rateLimit.isAuthenticated
-              ? "Using backend GitHub token"
-              : "Using unauthenticated GitHub limit"}
-          </p>
-        </div>
-        <button
-          className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-300 px-3 text-sm font-semibold text-slate-800 transition hover:border-slate-400 hover:bg-slate-50"
-          onClick={loadRateLimit}
-          type="button"
-        >
+        <p className="text-sm text-muted-foreground">
+          {rateLimit.isAuthenticated
+            ? "Using backend GitHub token"
+            : "Using unauthenticated GitHub limit"}
+        </p>
+        <Button variant="outline" size="sm" onClick={loadRateLimit}>
           Refresh
-        </button>
+        </Button>
       </div>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
@@ -167,17 +151,17 @@ export function GitHubRateLimitCard() {
         />
       </div>
 
-      <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
         <div
-          className="h-full rounded-full bg-emerald-600"
+          className="h-full rounded-full bg-brand transition-[width] duration-500"
           style={{ width: percentFormatter.format(Math.min(usedRatio, 1)) }}
         />
       </div>
 
-      <p className="mt-3 text-xs text-slate-500">
+      <p className="mt-3 text-xs text-muted-foreground">
         Core REST API resets at {resetTime}.
       </p>
-    </article>
+    </Card>
   );
 }
 
@@ -190,11 +174,11 @@ type RateLimitStatProps = {
 // values. Keeping it local avoids a shared component before the UI needs one.
 function RateLimitStat({ label, value }: RateLimitStatProps) {
   return (
-    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-      <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
+    <div className="rounded-md border bg-muted/40 p-3">
+      <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
         {label}
       </p>
-      <p className="mt-2 font-mono text-lg font-semibold text-slate-950">
+      <p className="mt-2 font-mono text-lg font-semibold text-foreground">
         {value}
       </p>
     </div>

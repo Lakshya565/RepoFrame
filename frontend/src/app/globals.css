@@ -1,18 +1,126 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
+/*
+  Dark mode is driven by a `.dark` class on <html> (set by next-themes) rather
+  than the OS media query, so the in-app theme toggle can override the system
+  preference. This custom variant makes Tailwind's `dark:` utilities follow it.
+*/
+@custom-variant dark (&:is(.dark *));
+
+/*
+  Design tokens. RepoFrame uses a green + near-black palette: deep green as the
+  primary surface/CTA in light mode, a brighter (but non-neon) green accent on
+  near-black in dark mode, and soft light-green tints for secondary surfaces.
+  No gradients, neon, or glow.
+
+  Claim-verification status hues (amber/blue/red, plus a distinct success green)
+  are applied in the Badge component, always paired with a label + icon — never a
+  bare decorative dot.
+*/
 :root {
-  --background: #f8fafc;
-  --foreground: #020617;
+  --radius: 0.5rem;
+
+  /* Surfaces & text (light) */
+  --background: #f7f9f7; /* faint cool-green off-white (not clinical white) */
+  --foreground: #0a0f0d; /* near-black ink */
+  --card: #ffffff;
+  --card-foreground: #0a0f0d;
+  --popover: #ffffff;
+  --popover-foreground: #0a0f0d;
+
+  /* Primary = deep green (prominent, refined — not neon) */
+  --primary: #0e3528; /* dark green */
+  --primary-foreground: #ecfdf1;
+  --secondary: #ecfdf1; /* lightest green tint */
+  --secondary-foreground: #0e3528;
+  --muted: #eef2ee;
+  --muted-foreground: #586660;
+  --accent: #e1f4e8; /* light-green hover surface */
+  --accent-foreground: #0e3528;
+
+  /* Brand accent — links, active indicators, the primary CTA */
+  --brand: #157f4c; /* mid green, flat (no gradient) */
+  --brand-foreground: #ffffff;
+
+  --border: #e2e8e3;
+  --input: #dce5dd;
+  --ring: #157f4c; /* focus ring picks up the brand green */
+
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
 }
 
+.dark {
+  /* Near-black base with a faint green undertone (the "black" of the palette) */
+  --background: #0a0f0d;
+  --foreground: #e8f0ea;
+  --card: #111815;
+  --card-foreground: #e8f0ea;
+  --popover: #111815;
+  --popover-foreground: #e8f0ea;
+
+  /* On black, a brighter green reads as the accent without tipping into neon */
+  --primary: #45c07d;
+  --primary-foreground: #04140c;
+  --secondary: #16221b;
+  --secondary-foreground: #e8f0ea;
+  --muted: #161e19;
+  --muted-foreground: #8aa295;
+  --accent: #18271f;
+  --accent-foreground: #e8f0ea;
+
+  --brand: #45c07d;
+  --brand-foreground: #04140c;
+
+  --border: #1f2b24;
+  --input: #243029;
+  --ring: #45c07d;
+
+  --destructive: #f87171;
+  --destructive-foreground: #2a0a0a;
+}
+
+/* Expose tokens to Tailwind utilities (bg-card, text-muted-foreground, etc.). */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+
+  --font-sans: var(--font-plex-sans);
+  --font-mono: var(--font-jetbrains-mono);
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
+/* Base element defaults: token-driven border color and page background/text. */
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  body {
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  }
 }

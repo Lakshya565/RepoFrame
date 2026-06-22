@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+
 import {
   COLLABORATION_OPTIONS,
   EMPTY_USER_CONTEXT,
@@ -11,6 +12,11 @@ import {
   type UserContext,
   type UserContextTextKey,
 } from "@/lib/user-context";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
 type UserContextFormProps = {
   context: UserContext;
@@ -51,14 +57,11 @@ export function UserContextForm({
   }
 
   return (
-    <article className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-      <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">
-        Project context
-      </p>
-      <h2 className="mt-3 text-2xl font-semibold">
+    <Card className="p-6">
+      <h3 className="text-lg font-semibold">
         Tell RepoFrame what the repo can&apos;t show
-      </h2>
-      <p className="mt-3 text-base leading-7 text-slate-600">
+      </h3>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">
         These answers cover the parts of your project that code and config files
         cannot reveal. RepoFrame uses them so generated writeups stay grounded in
         what you tell it, instead of guessing intent, ownership, or impact.
@@ -78,7 +81,7 @@ export function UserContextForm({
           onEdit={() => setIsEditing(true)}
         />
       )}
-    </article>
+    </Card>
   );
 }
 
@@ -110,27 +113,27 @@ function UserContextFields({
         {USER_CONTEXT_TEXT_FIELDS.map((field) => (
           <div key={field.key}>
             <label
-              className="flex items-center gap-2 text-sm font-medium text-slate-900"
+              className="flex items-center gap-2 text-sm font-medium"
               htmlFor={`user-context-${field.key}`}
             >
               {field.label}
               {field.optional ? (
-                <span className="text-xs font-normal text-slate-400">
+                <span className="text-xs font-normal text-muted-foreground">
                   Optional
                 </span>
               ) : null}
             </label>
             {field.multiline ? (
-              <textarea
-                className="mt-2 min-h-24 w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-base leading-7 text-slate-950 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+              <Textarea
+                className="mt-2 min-h-24 resize-y"
                 id={`user-context-${field.key}`}
                 onChange={(event) => onTextChange(field.key, event.target.value)}
                 placeholder={field.placeholder}
                 value={context[field.key]}
               />
             ) : (
-              <input
-                className="mt-2 min-h-12 w-full rounded-md border border-slate-300 bg-white px-3 text-base text-slate-950 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+              <Input
+                className="mt-2 h-11"
                 id={`user-context-${field.key}`}
                 onChange={(event) => onTextChange(field.key, event.target.value)}
                 placeholder={field.placeholder}
@@ -138,26 +141,18 @@ function UserContextFields({
                 value={context[field.key]}
               />
             )}
-            <p className="mt-1.5 text-sm text-slate-500">{field.helper}</p>
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              {field.helper}
+            </p>
           </div>
         ))}
       </div>
 
       <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-        <button
-          className="min-h-11 rounded-md bg-slate-950 px-5 text-sm font-semibold text-white transition hover:bg-slate-800"
-          onClick={onSave}
-          type="button"
-        >
-          Save context
-        </button>
-        <button
-          className="min-h-11 rounded-md border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900"
-          onClick={onReset}
-          type="button"
-        >
+        <Button onClick={onSave}>Save context</Button>
+        <Button variant="outline" onClick={onReset}>
           Clear answers
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -174,28 +169,27 @@ type CollaborationChoiceProps = {
 function CollaborationChoice({ value, onChange }: CollaborationChoiceProps) {
   return (
     <fieldset>
-      <legend className="text-sm font-medium text-slate-900">
-        Solo or team
-      </legend>
+      <legend className="text-sm font-medium">Solo or team</legend>
       <div className="mt-2 flex flex-col gap-3 sm:flex-row">
         {COLLABORATION_OPTIONS.map((option) => {
           const isSelected = value === option.value;
           return (
             <button
               aria-pressed={isSelected}
-              className={`flex-1 rounded-md border px-4 py-3 text-left transition ${
+              className={cn(
+                "flex-1 cursor-pointer rounded-md border px-4 py-3 text-left transition-colors",
                 isSelected
-                  ? "border-emerald-500 bg-emerald-50 ring-4 ring-emerald-100"
-                  : "border-slate-300 bg-white hover:border-slate-400"
-              }`}
+                  ? "border-brand bg-accent text-accent-foreground"
+                  : "border-input hover:border-foreground/30 hover:bg-accent/50",
+              )}
               key={option.value}
               onClick={() => onChange(option.value)}
               type="button"
             >
-              <span className="block text-sm font-semibold text-slate-950">
+              <span className="block text-sm font-semibold">
                 {option.label}
               </span>
-              <span className="mt-0.5 block text-sm text-slate-500">
+              <span className="mt-0.5 block text-sm text-muted-foreground">
                 {option.helper}
               </span>
             </button>
@@ -218,7 +212,7 @@ function UserContextSummary({ context, onEdit }: UserContextSummaryProps) {
   return (
     <div className="mt-6">
       {hasAnyUserContext(context) ? (
-        <dl className="grid gap-4">
+        <dl className="grid gap-3">
           <SummaryRow
             label="Solo or team"
             value={getCollaborationLabel(context.collaboration)}
@@ -232,19 +226,15 @@ function UserContextSummary({ context, onEdit }: UserContextSummaryProps) {
           ))}
         </dl>
       ) : (
-        <p className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+        <p className="rounded-md border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
           No context saved yet. Add details so RepoFrame doesn&apos;t have to
           guess.
         </p>
       )}
 
-      <button
-        className="mt-6 inline-flex min-h-11 items-center rounded-md border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900"
-        onClick={onEdit}
-        type="button"
-      >
+      <Button variant="outline" className="mt-6" onClick={onEdit}>
         Edit answers
-      </button>
+      </Button>
     </div>
   );
 }
@@ -259,13 +249,15 @@ type SummaryRowProps = {
 function SummaryRow({ label, value }: SummaryRowProps) {
   const trimmedValue = value.trim();
   return (
-    <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
-      <dt className="text-sm font-medium text-slate-500">{label}</dt>
-      <dd className="mt-1 whitespace-pre-wrap break-words text-base leading-7 text-slate-950">
+    <div className="rounded-md border bg-muted/40 p-4">
+      <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </dt>
+      <dd className="mt-1.5 whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
         {trimmedValue !== "" ? (
           trimmedValue
         ) : (
-          <span className="text-slate-400">Not provided</span>
+          <span className="text-muted-foreground">Not provided</span>
         )}
       </dd>
     </div>

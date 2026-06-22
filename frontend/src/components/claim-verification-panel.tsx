@@ -1,4 +1,15 @@
+import {
+  CircleAlert,
+  CircleCheck,
+  CircleHelp,
+  CircleX,
+  type LucideIcon,
+} from "lucide-react";
+
 import { type ClaimStatus, type ClaimVerification } from "@/lib/repo-api";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type ClaimVerificationPanelProps = {
   // null until a verification has been run; an empty array means "ran, no claims".
@@ -19,33 +30,39 @@ function sectionLabel(section: string): string {
   return SECTION_LABELS[section] ?? section;
 }
 
-// Display metadata for each status: a human label and the badge color. Driving
-// both from one map keeps the four statuses consistent and matches the backend's
-// closed status set so an unknown value can never slip through untyped.
-const STATUS_DISPLAY: Record<ClaimStatus, { label: string; badge: string }> = {
-  supported: {
-    label: "Supported",
-    badge: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  },
+// The status badge variant union — kept narrow so each of the four claim statuses
+// maps to exactly one semantic Badge variant.
+type StatusVariant = "success" | "warning" | "info" | "destructive";
+
+// Display metadata for each status: a human label, the badge variant (which color
+// it carries), and an icon. Driving all three from one map keeps the four statuses
+// consistent and matches the backend's closed status set, so an unknown value can
+// never slip through untyped. Each badge always pairs the color with a label + icon
+// (never a bare colored dot).
+const STATUS_DISPLAY: Record<
+  ClaimStatus,
+  { label: string; variant: StatusVariant; Icon: LucideIcon }
+> = {
+  supported: { label: "Supported", variant: "success", Icon: CircleCheck },
   partially_supported: {
     label: "Partially supported",
-    badge: "border-amber-200 bg-amber-50 text-amber-700",
+    variant: "warning",
+    Icon: CircleAlert,
   },
   needs_user_confirmation: {
     label: "Needs confirmation",
-    badge: "border-sky-200 bg-sky-50 text-sky-700",
+    variant: "info",
+    Icon: CircleHelp,
   },
-  unsupported: {
-    label: "Unsupported",
-    badge: "border-red-200 bg-red-50 text-red-700",
-  },
+  unsupported: { label: "Unsupported", variant: "destructive", Icon: CircleX },
 };
 
 // Shows the agent's per-claim verification results: each generated claim with a
 // status badge, the evidence that backs it, an explanation, and a suggested
 // revision when one is offered. This is what makes RepoFrame feel like an agentic
 // repo-analysis tool rather than a generic AI writer. Renders nothing until a
-// verification has been requested.
+// verification has been requested. Result rows fade/slide in with a small stagger
+// so the panel reads as results "landing" (static under reduced motion).
 export function ClaimVerificationPanel({
   verifications,
   loading,
@@ -55,73 +72,81 @@ export function ClaimVerificationPanel({
   }
 
   return (
-    <article className="rounded-lg border border-slate-200 bg-slate-50 p-6">
-      <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700">
-        Claim verification
-      </p>
-      <h3 className="mt-3 text-lg font-semibold">
+    <Card className="bg-muted/30 p-6">
+      <h3 className="text-base font-semibold">
         How well the evidence backs each claim
       </h3>
 
       {loading ? (
-        <p className="mt-4 text-sm text-slate-500">
-          Checking each claim against the repository evidence…
-        </p>
+        <div className="mt-4 space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Checking each claim against the repository evidence…
+          </p>
+          {[0, 1, 2].map((item) => (
+            <Skeleton key={item} className="h-20" />
+          ))}
+        </div>
       ) : verifications && verifications.length > 0 ? (
         <ul className="mt-4 grid gap-3">
-          {verifications.map((item, index) => (
-            <li
-              className="rounded-md border border-slate-200 bg-white p-4"
-              key={`${item.claim}-${index}`}
-            >
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <p className="text-base leading-7 text-slate-950">{item.claim}</p>
-                <span
-                  className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${STATUS_DISPLAY[item.status].badge}`}
-                >
-                  {STATUS_DISPLAY[item.status].label}
-                </span>
-              </div>
-
-              {item.sections.length > 0 ? (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {item.sections.map((section) => (
-                    <span
-                      className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-xs font-medium text-slate-600"
-                      key={section}
-                    >
-                      {sectionLabel(section)}
-                    </span>
-                  ))}
+          {verifications.map((item, index) => {
+            const status = STATUS_DISPLAY[item.status];
+            return (
+              <li
+                className="rounded-md border bg-card p-4 duration-500 animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-both motion-reduce:animate-none"
+                style={{ animationDelay: `${index * 60}ms` }}
+                key={`${item.claim}-${index}`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <p className="text-sm leading-6 text-foreground">
+                    {item.claim}
+                  </p>
+                  <Badge
+                    variant={status.variant}
+                    className="shrink-0 duration-300 animate-in fade-in-0 zoom-in-95 fill-mode-both motion-reduce:animate-none"
+                    style={{ animationDelay: `${index * 60 + 120}ms` }}
+                  >
+                    <status.Icon />
+                    {status.label}
+                  </Badge>
                 </div>
-              ) : null}
 
-              {item.explanation ? (
-                <p className="mt-2 text-sm leading-6 text-slate-600">
-                  {item.explanation}
-                </p>
-              ) : null}
+                {item.sections.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {item.sections.map((section) => (
+                      <Badge variant="muted" key={section}>
+                        {sectionLabel(section)}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : null}
 
-              {item.supportingEvidence.length > 0 ? (
-                <p className="mt-2 break-words font-mono text-xs text-slate-500">
-                  {item.supportingEvidence.join(", ")}
-                </p>
-              ) : null}
+                {item.explanation ? (
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                    {item.explanation}
+                  </p>
+                ) : null}
 
-              {item.suggestedRevision ? (
-                <p className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-700">
-                  <span className="font-semibold">Suggested revision: </span>
-                  {item.suggestedRevision}
-                </p>
-              ) : null}
-            </li>
-          ))}
+                {item.supportingEvidence.length > 0 ? (
+                  <p className="mt-2 break-words font-mono text-xs text-muted-foreground">
+                    {item.supportingEvidence.join(", ")}
+                  </p>
+                ) : null}
+
+                {item.suggestedRevision ? (
+                  <p className="mt-2 rounded-md border bg-muted/50 px-3 py-2 text-sm leading-6">
+                    <span className="font-semibold">Suggested revision: </span>
+                    {item.suggestedRevision}
+                  </p>
+                ) : null}
+              </li>
+            );
+          })}
         </ul>
       ) : (
-        <p className="mt-4 text-sm text-slate-500">
+        <p className="mt-4 text-sm text-muted-foreground">
           No claims were found to verify. Generate some outputs first.
         </p>
       )}
-    </article>
+    </Card>
   );
 }

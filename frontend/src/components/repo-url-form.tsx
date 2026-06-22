@@ -2,10 +2,15 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
-import { parseRepoUrl } from "@/lib/repo-api";
+import { ArrowRight, Loader2 } from "lucide-react";
 
-// Handles the initial repo URL entry flow. It sends raw user input to the
-// backend parser, then routes with only normalized owner/repo/url values.
+import { parseRepoUrl } from "@/lib/repo-api";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+// Handles the initial repo URL entry flow. It sends raw user input to the backend
+// parser, then routes with only normalized owner/repo/url values. Validation and
+// parsing stay on the backend; this component only manages input + request state.
 export function RepoUrlForm() {
   const router = useRouter();
   const [repoUrl, setRepoUrl] = useState("");
@@ -45,21 +50,18 @@ export function RepoUrlForm() {
   }
 
   return (
-    <form
-      className="w-full rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5"
-      onSubmit={handleSubmit}
-      noValidate
-    >
+    <form className="w-full" onSubmit={handleSubmit} noValidate>
       <label
-        className="text-sm font-medium text-slate-900"
+        className="text-sm font-medium text-foreground"
         htmlFor="repo-url"
       >
         GitHub repository URL
       </label>
-      <div className="mt-2 flex flex-col gap-3 sm:flex-row">
-        <input
+      <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+        <Input
           aria-describedby={error ? "repo-url-error" : "repo-url-help"}
-          className="min-h-12 flex-1 rounded-md border border-slate-300 bg-white px-3 text-base text-slate-950 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-50"
+          aria-invalid={error ? true : undefined}
+          className="h-11 flex-1 font-mono text-sm"
           disabled={isSubmitting}
           id="repo-url"
           onChange={(event) => {
@@ -68,27 +70,37 @@ export function RepoUrlForm() {
               setError(null);
             }
           }}
-          placeholder="https://github.com/{owner}/{repo}.git"
+          placeholder="https://github.com/{owner}/{repo}"
           type="url"
           value={repoUrl}
         />
-        <button
-          className="min-h-12 rounded-md bg-slate-950 px-5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
-          disabled={isSubmitting}
+        <Button
           type="submit"
+          variant="brand"
+          className="h-11 px-5 sm:w-auto"
+          disabled={isSubmitting}
         >
-          {isSubmitting ? "Analyzing..." : "Analyze repo"}
-        </button>
+          {isSubmitting ? (
+            <>
+              <Loader2 className="animate-spin" />
+              Analyzing…
+            </>
+          ) : (
+            <>
+              Analyze repo
+              <ArrowRight />
+            </>
+          )}
+        </Button>
       </div>
-      <div className="mt-3 text-sm">
+      <div className="mt-2 min-h-5 text-sm">
         {error ? (
-          <p className="text-red-700" id="repo-url-error">
+          <p className="text-destructive" id="repo-url-error" role="alert">
             {error}
           </p>
         ) : (
-          <p className="text-slate-500" id="repo-url-help">
-            Use the HTTPS clone URL or browser URL from a public GitHub
-            repository.
+          <p className="text-muted-foreground" id="repo-url-help">
+            Use the HTTPS clone or browser URL of any public GitHub repository.
           </p>
         )}
       </div>

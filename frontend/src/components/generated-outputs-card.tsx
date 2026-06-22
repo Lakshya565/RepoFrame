@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { Check, Copy, Loader2 } from "lucide-react";
+
 import {
   INSTRUCTION_MAX_LENGTH,
   applyEdit,
@@ -12,6 +14,9 @@ import {
   type InterviewTopic,
   type OutputSection,
 } from "@/lib/repo-api";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
 // A tab is one of the four output sections or the interview-prep tab.
 type CardTab = OutputSection | "interview";
@@ -41,7 +46,10 @@ type GeneratedOutputsCardProps = {
     guidance: string,
   ) => Promise<void> | void;
   // Revise one section using the current draft plus the instruction as feedback.
-  onReviseSection: (section: OutputSection, instruction: string) => Promise<boolean>;
+  onReviseSection: (
+    section: OutputSection,
+    instruction: string,
+  ) => Promise<boolean>;
   // Generate interview prep, with optional preemptive guidance.
   onGenerateInterview: (guidance: string) => Promise<void> | void;
 };
@@ -148,19 +156,35 @@ export function GeneratedOutputsCard({
     }
   }
 
+  // A reusable Copy button that swaps to a confirming "Copied" state with a check
+  // icon for a moment after a successful copy.
+  function copyButton(text: string, disabled: boolean) {
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={disabled}
+        onClick={() => handleCopy(text)}
+      >
+        {copied ? <Check /> : <Copy />}
+        {copied ? "Copied" : "Copy"}
+      </Button>
+    );
+  }
+
   // The shared instruction box, rendered on every tab with a tab-appropriate hint.
   function renderInstructionBox(helper: string) {
     return (
-      <div className="mt-5 border-t border-slate-200 pt-4">
+      <div className="mt-5 border-t pt-4">
         <label
-          className="text-sm font-medium text-slate-900"
+          className="text-sm font-medium"
           htmlFor={`instructions-${activeTab}`}
         >
           Instructions for the model (optional)
         </label>
-        <p className="mt-1 text-sm text-slate-500">{helper}</p>
-        <textarea
-          className="mt-2 min-h-16 w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm leading-6 text-slate-950 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-50"
+        <p className="mt-1 text-sm text-muted-foreground">{helper}</p>
+        <Textarea
+          className="mt-2 resize-y"
           disabled={busy}
           id={`instructions-${activeTab}`}
           maxLength={INSTRUCTION_MAX_LENGTH}
@@ -168,7 +192,7 @@ export function GeneratedOutputsCard({
           placeholder="e.g. keep it concise, lead with measurable impact"
           value={instruction}
         />
-        <div className="mt-1 text-right text-xs text-slate-400">
+        <div className="mt-1 text-right text-xs text-muted-foreground">
           {instruction.length}/{INSTRUCTION_MAX_LENGTH}
         </div>
       </div>
@@ -189,38 +213,34 @@ export function GeneratedOutputsCard({
     return (
       <>
         <div className="flex flex-wrap gap-2">
-          <button
-            className="min-h-10 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          <Button
             disabled={busy}
             onClick={() => handleGenerateSection(section)}
-            type="button"
           >
-            {isGeneratingThis
-              ? "Generating…"
-              : hasContent
-                ? "Generate again"
-                : "Generate"}
-          </button>
-          <button
-            className="min-h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={!hasContent}
-            onClick={() => handleCopy(currentCopyText)}
-            type="button"
-          >
-            {copied ? "Copied" : "Copy"}
-          </button>
-          <button
-            className="min-h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+            {isGeneratingThis ? (
+              <>
+                <Loader2 className="animate-spin" />
+                Generating…
+              </>
+            ) : hasContent ? (
+              "Generate again"
+            ) : (
+              "Generate"
+            )}
+          </Button>
+          {copyButton(currentCopyText, !hasContent)}
+          <Button
+            variant="outline"
+            size="sm"
             disabled={busy || !hasContent}
             onClick={toggleEditing}
-            type="button"
           >
             {isEditing ? "Done editing" : "Edit"}
-          </button>
+          </Button>
         </div>
 
         {hasContent ? (
-          <p className="mt-2 text-xs text-slate-500">
+          <p className="mt-2 text-xs text-muted-foreground">
             <strong className="font-semibold">Generate again</strong> rewrites
             this tab from the profile and ignores your edits. To keep your edits,
             use <strong className="font-semibold">Regenerate</strong> below.
@@ -229,8 +249,8 @@ export function GeneratedOutputsCard({
 
         <div className="mt-4">
           {isEditing ? (
-            <textarea
-              className="min-h-48 w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-sm leading-6 text-slate-950 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+            <Textarea
+              className="min-h-48 resize-y font-mono"
               onChange={(event) => handleDraftChange(event.target.value)}
               value={draft}
             />
@@ -244,14 +264,21 @@ export function GeneratedOutputsCard({
         )}
 
         <div className="mt-2">
-          <button
-            className="min-h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+          <Button
+            variant="outline"
+            size="sm"
             disabled={!canRevise}
             onClick={() => handleRevise(section)}
-            type="button"
           >
-            {isRevisingThis ? "Regenerating…" : "Regenerate"}
-          </button>
+            {isRevisingThis ? (
+              <>
+                <Loader2 className="animate-spin" />
+                Regenerating…
+              </>
+            ) : (
+              "Regenerate"
+            )}
+          </Button>
         </div>
       </>
     );
@@ -264,41 +291,34 @@ export function GeneratedOutputsCard({
     return (
       <>
         <div className="flex flex-wrap gap-2">
-          <button
-            className="min-h-10 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          <Button
             disabled={busy}
             onClick={() => onGenerateInterview(instruction.trim())}
-            type="button"
           >
-            {generatingInterview
-              ? "Generating…"
-              : hasTopics
-                ? "Generate again"
-                : "Generate"}
-          </button>
-          <button
-            className="min-h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={topics.length === 0}
-            onClick={() => handleCopy(interviewToText(topics))}
-            type="button"
-          >
-            {copied ? "Copied" : "Copy"}
-          </button>
+            {generatingInterview ? (
+              <>
+                <Loader2 className="animate-spin" />
+                Generating…
+              </>
+            ) : hasTopics ? (
+              "Generate again"
+            ) : (
+              "Generate"
+            )}
+          </Button>
+          {copyButton(interviewToText(topics), topics.length === 0)}
         </div>
 
         <div className="mt-4">
           {hasTopics ? (
             topics.length > 0 ? (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {topics.map((topic, index) => (
-                  <div
-                    className="rounded-md border border-slate-200 bg-slate-50 p-4"
-                    key={index}
-                  >
-                    <p className="text-base font-semibold text-slate-950">
+                  <div className="rounded-md border bg-muted/40 p-4" key={index}>
+                    <p className="text-sm font-semibold text-foreground">
                       {topic.question}
                     </p>
-                    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-slate-700">
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-muted-foreground">
                       {topic.talkingPoints.map((point, pointIndex) => (
                         <li key={pointIndex}>{point}</li>
                       ))}
@@ -307,7 +327,7 @@ export function GeneratedOutputsCard({
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-muted-foreground">
                 No interview topics were returned.
               </p>
             )
@@ -324,17 +344,18 @@ export function GeneratedOutputsCard({
   }
 
   return (
-    <div className="rounded-md border border-slate-200 bg-white">
-      <div className="flex flex-wrap gap-2 border-b border-slate-200 p-3">
+    <div className="rounded-lg border bg-card">
+      <div className="flex flex-wrap gap-1 border-b p-2">
         {CARD_TABS.map((item) => {
           const isActive = item.tab === activeTab;
           return (
             <button
-              className={`rounded-md px-3 py-2 text-sm font-semibold transition ${
+              className={cn(
+                "cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
                 isActive
-                  ? "bg-slate-950 text-white"
-                  : "text-slate-600 hover:bg-slate-100"
-              }`}
+                  ? "bg-secondary text-secondary-foreground"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+              )}
               key={item.tab}
               onClick={() => selectTab(item.tab)}
               type="button"
@@ -345,7 +366,12 @@ export function GeneratedOutputsCard({
         })}
       </div>
 
-      <div className="p-4">
+      {/* Keyed by the active tab so switching tabs re-runs the fade-in, giving a
+          light crossfade between panels (static under reduced motion). */}
+      <div
+        key={activeTab}
+        className="p-4 duration-200 animate-in fade-in-0 motion-reduce:animate-none"
+      >
         {activeTab === "interview"
           ? renderInterviewPanel()
           : renderOutputPanel(activeTab)}
@@ -368,7 +394,7 @@ function OutputPreview({ outputs, section }: OutputPreviewProps) {
       return <EmptyOutput />;
     }
     return (
-      <ul className="list-disc space-y-2 pl-5 text-base leading-7 text-slate-800">
+      <ul className="list-disc space-y-2 pl-5 text-sm leading-7 text-foreground">
         {bullets.map((bullet, index) => (
           <li key={index}>{bullet}</li>
         ))}
@@ -381,7 +407,7 @@ function OutputPreview({ outputs, section }: OutputPreviewProps) {
     return <EmptyOutput />;
   }
   return (
-    <p className="whitespace-pre-wrap break-words text-base leading-7 text-slate-800">
+    <p className="whitespace-pre-wrap break-words text-sm leading-7 text-foreground">
       {value}
     </p>
   );
@@ -390,7 +416,7 @@ function OutputPreview({ outputs, section }: OutputPreviewProps) {
 // Placeholder shown when a tab has not been generated yet.
 function EmptyOutput() {
   return (
-    <p className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+    <p className="rounded-md border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
       Nothing generated yet. Use Generate to create it.
     </p>
   );

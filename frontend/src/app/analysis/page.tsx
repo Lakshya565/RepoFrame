@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { GitHubRateLimitCard } from "@/components/github-rate-limit-card";
-import { ImportantFilesCard } from "@/components/important-files-card";
-import { RepoSummaryCard } from "@/components/repo-summary-card";
-import { ProjectWriteupSection } from "@/components/project-writeup-section";
-import { RepoTreeView } from "@/components/repo-tree-view";
-import { TechStackCard } from "@/components/tech-stack-card";
+import { ArrowLeft } from "lucide-react";
+
+import { SiteHeader } from "@/components/site-header";
+import { AnalysisWorkspace } from "@/components/analysis-workspace";
+import { ErrorState } from "@/components/states";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 type AnalysisPageProps = {
   searchParams: Promise<{
@@ -19,8 +20,9 @@ function getParam(value: string | string[] | undefined): string | null {
   return typeof value === "string" ? value : null;
 }
 
-// Validates the query params produced by the repo form and leaves live GitHub
-// fetching to client components below. This keeps the route shell thin.
+// Validates the query params produced by the repo form, then hands off to the
+// client workspace, which owns the two-column layout and all live GitHub/OpenAI
+// fetching. The route shell stays thin.
 export default async function AnalysisPage({ searchParams }: AnalysisPageProps) {
   const params = await searchParams;
   const owner = getParam(params.owner);
@@ -29,46 +31,28 @@ export default async function AnalysisPage({ searchParams }: AnalysisPageProps) 
 
   if (!owner || !repo || !normalizedUrl) {
     return (
-      <main className="min-h-screen bg-slate-50 px-5 py-12 text-slate-950 sm:px-8">
-        <section className="mx-auto max-w-2xl rounded-lg border border-red-200 bg-white p-6 shadow-sm">
-          <h1 className="text-2xl font-semibold">
-            RepoFrame could not read that repository.
-          </h1>
-          <p className="mt-3 text-base leading-7 text-slate-600">
-            Enter a GitHub URL in the format
-            https://github.com/{`{owner}`}/{`{repo}`} or
-            https://github.com/{`{owner}`}/{`{repo}`}.git.
-          </p>
-          <Link
-            className="mt-6 inline-flex min-h-11 items-center rounded-md bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800"
-            href="/"
-          >
-            Back to RepoFrame
-          </Link>
-        </section>
+      <main className="flex min-h-screen flex-col">
+        <SiteHeader />
+        <div className="mx-auto w-full max-w-2xl flex-1 px-5 py-16 sm:px-8">
+          <ErrorState
+            title="RepoFrame could not read that repository."
+            message="Enter a GitHub URL like https://github.com/{owner}/{repo}."
+          />
+          <div className="mt-6 flex justify-center">
+            <Link href="/" className={cn(buttonVariants({ variant: "outline" }))}>
+              <ArrowLeft />
+              Back to RepoFrame
+            </Link>
+          </div>
+        </div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 px-5 py-12 text-slate-950 sm:px-8">
-      <section className="mx-auto max-w-3xl">
-        <Link
-          className="text-sm font-medium text-emerald-700 transition hover:text-emerald-900"
-          href="/"
-        >
-          Back to RepoFrame
-        </Link>
-
-        <div className="mt-6 space-y-6">
-          <RepoSummaryCard repoUrl={normalizedUrl} />
-          <TechStackCard repoUrl={normalizedUrl} />
-          <ImportantFilesCard repoUrl={normalizedUrl} />
-          <RepoTreeView repoUrl={normalizedUrl} />
-          <ProjectWriteupSection repoUrl={normalizedUrl} />
-          <GitHubRateLimitCard />
-        </div>
-      </section>
+    <main className="flex min-h-screen flex-col">
+      <SiteHeader />
+      <AnalysisWorkspace owner={owner} repo={repo} repoUrl={normalizedUrl} />
     </main>
   );
 }
