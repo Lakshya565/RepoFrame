@@ -10,7 +10,7 @@ type EvidencePanelProps = {
 // is what keeps RepoFrame evidence-backed rather than a generic AI writer.
 export function EvidencePanel({ evidence }: EvidencePanelProps) {
   return (
-    <Card className="bg-muted/30 p-6">
+    <Card beam className="bg-muted/30 p-6">
       <h3 className="text-base font-semibold">What backs these claims</h3>
 
       {evidence.length > 0 ? (

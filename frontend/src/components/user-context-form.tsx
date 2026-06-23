@@ -57,7 +57,7 @@ export function UserContextForm({
   }
 
   return (
-    <Card className="p-6">
+    <Card beam className="p-6">
       <h3 className="text-lg font-semibold">
         Tell RepoFrame what the repo can&apos;t show
       </h3>

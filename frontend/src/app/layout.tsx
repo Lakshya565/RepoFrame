@@ -3,6 +3,7 @@ import { IBM_Plex_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { MetricsDrawer } from "@/components/metrics/metrics-drawer";
+import { ScrollProgress } from "@/components/ui/scroll-progress";
 
 // IBM Plex Sans for body/UI text and JetBrains Mono for code, file paths, and
 // data labels — a deliberate developer-tool pairing rather than a single generic
@@ -16,7 +17,8 @@ const plexSans = IBM_Plex_Sans({
 const jetBrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  // 800 (ExtraBold) is loaded for the large "RepoFrame" hero wordmark.
+  weight: ["400", "500", "600", "700", "800"],
 });
 
 export const metadata: Metadata = {
@@ -46,6 +48,8 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
+          {/* Thin green rail pinned to the top of every page, tracking scroll. */}
+          <ScrollProgress />
           {children}
           <MetricsDrawer />
         </ThemeProvider>

@@ -111,6 +111,45 @@
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) + 2px);
+  --animate-rippling: rippling var(--duration) ease-out;
+  @keyframes rippling {
+  0% {
+    opacity: 1;
+    }
+  100% {
+    transform: scale(2);
+    opacity: 0;
+    }
+  }
+}
+
+/*
+  Theme switch animation. The light/dark toggle (theme-toggle.tsx) wraps the
+  theme change in a View Transition and animates a clip-path circle on the NEW
+  snapshot, so the incoming theme wipes out in an expanding circle from the
+  button. We disable the browser's default cross-fade here so that clip-path is
+  the only motion, and keep the new snapshot stacked above the old one. The
+  toggle falls back to an instant switch when View Transitions are unsupported,
+  and reduced-motion users skip the animation entirely (handled in JS), with the
+  media query below as a belt-and-suspenders guard.
+*/
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-new(root) {
+  z-index: 1;
+}
+::view-transition-old(root) {
+  z-index: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
 }
 
 /* Base element defaults: token-driven border color and page background/text. */

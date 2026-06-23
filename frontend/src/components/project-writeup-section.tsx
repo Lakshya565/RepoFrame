@@ -323,7 +323,7 @@ export function ProjectWriteupSection({
     <div className="space-y-6">
       <UserContextForm context={context} onContextChange={setContext} />
 
-      <Card className="p-6">
+      <Card beam className="p-6">
         <h3 className="text-lg font-semibold">Turn this repo into a writeup</h3>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
           Generate each piece on its own from the tabs below, or generate

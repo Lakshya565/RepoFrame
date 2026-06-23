@@ -144,7 +144,7 @@ export function RepoTreeView({ repoUrl }: RepoTreeViewProps) {
   }
 
   return (
-    <Card className="p-6">
+    <Card beam className="p-6">
       <p className="text-sm text-muted-foreground">
         Branch{" "}
         <span className="font-mono text-foreground">{tree.defaultBranch}</span>

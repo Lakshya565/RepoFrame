@@ -117,7 +117,7 @@ export function ImportantFilesCard({ repoUrl }: ImportantFilesCardProps) {
   }
 
   return (
-    <Card className="p-6">
+    <Card beam className="p-6">
       <p className="text-sm text-muted-foreground">
         We focused on {numberFormatter.format(ranking.returnedFiles)} of{" "}
         {numberFormatter.format(ranking.totalFiles)} files to understand your

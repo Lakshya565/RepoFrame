@@ -72,7 +72,7 @@ export function ClaimVerificationPanel({
   }
 
   return (
-    <Card className="bg-muted/30 p-6">
+    <Card beam className="bg-muted/30 p-6">
       <h3 className="text-base font-semibold">
         How well the evidence backs each claim
       </h3>

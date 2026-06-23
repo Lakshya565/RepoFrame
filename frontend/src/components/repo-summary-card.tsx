@@ -139,7 +139,7 @@ export function RepoSummaryCard({ repoUrl }: RepoSummaryCardProps) {
   }
 
   return (
-    <Card className="p-6">
+    <Card beam className="p-6">
       <div className="flex flex-col items-start gap-3">
         <h3 className="break-words text-lg font-semibold">
           {metadata.owner}/{metadata.name}

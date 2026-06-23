@@ -82,6 +82,50 @@ export function GrowLine({
   );
 }
 
+// Reveals text one letter at a time, each character rising and fading into place
+// with a stagger. Best for a short display word (e.g. the "RepoFrame" wordmark)
+// where a per-letter cascade reads as a deliberate, "graphic" entrance. The full
+// word is exposed to screen readers via aria-label while the per-letter spans are
+// hidden from them, and reduced motion renders the text instantly. Animates on
+// mount, so use it above the fold.
+export function LettersReveal({
+  text,
+  className,
+  delay = 0,
+  stagger = 0.05,
+}: {
+  text: string;
+  className?: string;
+  delay?: number;
+  stagger?: number;
+}) {
+  const reduce = useReducedMotion();
+
+  if (reduce) {
+    return <span className={className}>{text}</span>;
+  }
+
+  const letters = text.split("");
+
+  return (
+    <span className={className} aria-label={text}>
+      {letters.map((char, index) => (
+        <motion.span
+          key={index}
+          aria-hidden
+          className="inline-block"
+          initial={{ y: "0.6em", opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ duration: 0.5, ease: EASE, delay: delay + index * stagger }}
+        >
+          {/* Non-breaking space keeps spaces from collapsing on inline-block. */}
+          {char === " " ? " " : char}
+        </motion.span>
+      ))}
+    </span>
+  );
+}
+
 // Reveals a headline one word at a time, each word rising and fading into place
 // with a stagger — a more dramatic, "graphic" entrance than a single block fade.
 // The full text is preserved as readable inline content (no overflow clipping of

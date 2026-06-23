@@ -139,7 +139,7 @@ export function TechStackCard({ repoUrl }: TechStackCardProps) {
   }
 
   return (
-    <Card className="p-6">
+    <Card beam className="p-6">
       <h3 className="text-base font-semibold">Tech stack</h3>
       <p className="mt-1 text-sm text-muted-foreground">
         What your project is built with.
