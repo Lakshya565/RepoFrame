@@ -15,9 +15,10 @@ import { subscribePointer } from "@/lib/pointer";
 // reaches this far *outside* the text too, so it reacts as the cursor approaches.
 const GLOW_RADIUS_PX = 150;
 
-// Outline color. `var(--brand)` keeps it on-palette and theme-aware (mid green in
-// light mode, brighter green in dark mode).
-const GLOW_COLOR = "var(--brand)";
+// Outline color. The shared theme-aware `--glow` token: a faint near-black in
+// light mode (so the halo stays visible against the light surface) and white in
+// dark mode, matching the MagicCard spotlight.
+const GLOW_COLOR = "var(--glow)";
 
 // Thickness (px) of the glowing letter outline.
 const STROKE_WIDTH_PX = 0.5;

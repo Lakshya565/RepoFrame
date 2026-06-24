@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { fetchRepoTree, type RepoTreeResponse } from "@/lib/repo-api";
 import { buildRepoTree, type RepoTreeNode } from "@/lib/repo-tree";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/states";
+import { File, Folder, Tree } from "@/components/ui/file-tree";
 
 type RepoTreeViewProps = {
   repoUrl: string;
@@ -15,21 +15,54 @@ type RepoTreeViewProps = {
 
 const numberFormatter = new Intl.NumberFormat("en-US");
 
-// Fetches GitHub's repository structure and renders it as a compact expandable
-// tree. It intentionally works only with paths/types from the tree API, not file
-// contents, so Phase 4 stays focused on structure.
+// Renders our backend tree nodes as Magic UI Folder/File rows. Folders are
+// tinted brand green (the trigger's `text-brand` flows into the icon + label via
+// currentColor) and carry a muted file-count badge; files keep the default
+// treatment. buildRepoTree already sorts folders-first then alphabetically.
+function renderNodes(nodes: RepoTreeNode[]): React.ReactNode {
+  return nodes.map((node) => {
+    if (node.type === "directory") {
+      return (
+        <Folder
+          key={node.path}
+          value={node.path}
+          className="text-brand"
+          element={
+            <span className="inline-flex items-center gap-2">
+              {node.name}
+              <span className="text-xs font-normal text-muted-foreground">
+                {numberFormatter.format(node.fileCount)} files
+              </span>
+            </span>
+          }
+        >
+          {renderNodes(node.children)}
+        </Folder>
+      );
+    }
+
+    return (
+      <File key={node.path} value={node.path}>
+        <span>{node.name}</span>
+      </File>
+    );
+  });
+}
+
+// Fetches GitHub's repository structure and renders it as a Magic UI file tree:
+// an accordion-style browser with folder/file icons and a vertical guide line.
+// It intentionally works only with paths/types from the tree API, not file
+// contents, so Phase 4 stays focused on structure. Expansion state is owned by
+// the Tree component itself; we only feed it the converted elements.
 export function RepoTreeView({ repoUrl }: RepoTreeViewProps) {
   const [tree, setTree] = useState<RepoTreeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(true);
 
-  // Reloads the file tree for the retry button. It also collapses the tree so a
-  // fresh response starts from the same top-level view every time.
+  // Reloads the file tree for the retry button.
   const loadTree = useCallback(async () => {
     setIsLoading(true);
     setError(null);
-    setExpandedPaths(new Set());
 
     try {
       const repoTree = await fetchRepoTree(repoUrl);
@@ -54,7 +87,6 @@ export function RepoTreeView({ repoUrl }: RepoTreeViewProps) {
     async function run() {
       setIsLoading(true);
       setError(null);
-      setExpandedPaths(new Set());
 
       try {
         const repoTree = await fetchRepoTree(repoUrl);
@@ -85,7 +117,7 @@ export function RepoTreeView({ repoUrl }: RepoTreeViewProps) {
   }, [repoUrl]);
 
   // Converts GitHub's flat list of file paths into nested nodes only when the
-  // backend response changes. The render path can then stay recursive and simple.
+  // backend response changes, so render stays cheap.
   const treeRoot = useMemo(() => {
     if (!tree) {
       return null;
@@ -93,22 +125,6 @@ export function RepoTreeView({ repoUrl }: RepoTreeViewProps) {
 
     return buildRepoTree(tree.files);
   }, [tree]);
-
-  // Tracks expanded folders by normalized path. Child rows receive this state
-  // rather than owning their own expansion state, which keeps recursion stable.
-  const toggleNode = useCallback((path: string) => {
-    setExpandedPaths((currentPaths) => {
-      const nextPaths = new Set(currentPaths);
-
-      if (nextPaths.has(path)) {
-        nextPaths.delete(path);
-      } else {
-        nextPaths.add(path);
-      }
-
-      return nextPaths;
-    });
-  }, []);
 
   if (isLoading) {
     return (
@@ -161,81 +177,19 @@ export function RepoTreeView({ repoUrl }: RepoTreeViewProps) {
         </p>
       ) : null}
 
-      <div className="mt-5 max-h-96 overflow-auto rounded-md border bg-muted/40 p-4 font-mono text-sm leading-6">
-        <div className="text-muted-foreground">.</div>
+      <div className="mt-5 h-96 rounded-md border bg-muted/40 py-3">
         {treeRoot && treeRoot.children.length > 0 ? (
-          <ul className="mt-1 space-y-1">
-            {treeRoot.children.map((node) => (
-              <RepoTreeRow
-                expandedPaths={expandedPaths}
-                key={node.path}
-                node={node}
-                onToggle={toggleNode}
-              />
-            ))}
-          </ul>
-        ) : null}
+          // No initialExpandedItems → the tree opens fully collapsed.
+          // Re-key on the repo URL so a fresh repo resets expansion state.
+          <Tree key={repoUrl} className="text-foreground">
+            {renderNodes(treeRoot.children)}
+          </Tree>
+        ) : (
+          <p className="px-4 text-sm text-muted-foreground">
+            This repository has no files to display.
+          </p>
+        )}
       </div>
     </Card>
-  );
-}
-
-type RepoTreeRowProps = {
-  node: RepoTreeNode;
-  expandedPaths: Set<string>;
-  onToggle: (path: string) => void;
-};
-
-// Renders one file-tree node. Folder nodes expose a caret button and recursively
-// render children only when their path is marked as expanded.
-function RepoTreeRow({ node, expandedPaths, onToggle }: RepoTreeRowProps) {
-  const isDirectory = node.type === "directory";
-  const hasChildren = node.children.length > 0;
-  const isExpanded = expandedPaths.has(node.path);
-  const label = isDirectory ? `${node.name}/` : node.name;
-
-  return (
-    <li>
-      <div className="flex min-h-7 items-center gap-2">
-        {isDirectory && hasChildren ? (
-          <button
-            aria-expanded={isExpanded}
-            aria-label={`${isExpanded ? "Collapse" : "Expand"} ${node.path}`}
-            className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            onClick={() => onToggle(node.path)}
-            type="button"
-          >
-            {isExpanded ? (
-              <ChevronDown className="size-3.5" />
-            ) : (
-              <ChevronRight className="size-3.5" />
-            )}
-          </button>
-        ) : (
-          <span className="size-5 shrink-0" />
-        )}
-        <span className={isDirectory ? "font-medium text-brand" : "text-foreground"}>
-          {label}
-        </span>
-        {isDirectory ? (
-          <span className="text-xs text-muted-foreground">
-            {numberFormatter.format(node.fileCount)} files
-          </span>
-        ) : null}
-      </div>
-
-      {isDirectory && hasChildren && isExpanded ? (
-        <ul className="ml-2.5 space-y-1 border-l pl-4">
-          {node.children.map((childNode) => (
-            <RepoTreeRow
-              expandedPaths={expandedPaths}
-              key={childNode.path}
-              node={childNode}
-              onToggle={onToggle}
-            />
-          ))}
-        </ul>
-      ) : null}
-    </li>
   );
 }

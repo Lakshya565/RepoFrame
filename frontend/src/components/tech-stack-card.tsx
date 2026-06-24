@@ -13,39 +13,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/states";
+import { TechIconCloud } from "@/components/tech-icon-cloud";
+import { TechGlyph } from "@/components/tech-glyph";
 
 type TechStackCardProps = {
   repoUrl: string;
 };
 
-const logoFallbacks: Record<string, string> = {
-  "C#": "C#",
-  CSS: "CSS",
-  Docker: "D",
-  Express: "Ex",
-  FastAPI: "FA",
-  Flask: "Fl",
-  "GitHub Actions": "GH",
-  Go: "Go",
-  HTML: "H",
-  Java: "J",
-  JavaScript: "JS",
-  "Next.js": "N",
-  "Node.js": "N",
-  OpenCV: "CV",
-  Pandas: "Pd",
-  PostgreSQL: "Pg",
-  Python: "Py",
-  React: "R",
-  SQLite: "Sq",
-  Supabase: "Su",
-  "Tailwind CSS": "Tw",
-  TypeScript: "TS",
-  Vite: "V",
-};
-
-// Displays Phase 6 stack detection with compact source evidence. Logos are kept
-// as text badges for now so the UI stays dependency-free and consistent.
+// Displays Phase 6 stack detection with compact source evidence. Each row shows
+// the technology's real logo (see TechGlyph), with an icon cloud summarizing the
+// whole stack above the list.
 export function TechStackCard({ repoUrl }: TechStackCardProps) {
   const [stack, setStack] = useState<TechStackResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -145,6 +122,12 @@ export function TechStackCard({ repoUrl }: TechStackCardProps) {
         What your project is built with.
       </p>
 
+      {/* Interactive 3D cloud of the detected technologies, each as a
+          brand-green logo. Decorative summary above the auditable list below. */}
+      <TechIconCloud
+        techNames={stack.technologies.map((technology) => technology.name)}
+      />
+
       <ul className="mt-4 grid gap-3">
         {stack.technologies.map((technology) => (
           <TechStackItem key={technology.name} technology={technology} />
@@ -162,7 +145,6 @@ type TechStackItemProps = {
 // evidence stays available in a disclosure so the stack remains easy to scan.
 function TechStackItem({ technology }: TechStackItemProps) {
   const [isShowingAllSources, setIsShowingAllSources] = useState(false);
-  const logoText = logoFallbacks[technology.name] ?? technology.name.slice(0, 2);
   const evidenceSummary = getEvidenceSummary(technology.evidence);
   const displayedSources = isShowingAllSources
     ? evidenceSummary.allItems
@@ -171,8 +153,8 @@ function TechStackItem({ technology }: TechStackItemProps) {
   return (
     <li className="rounded-md border bg-muted/40 p-4">
       <div className="flex min-w-0 items-center gap-3">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-card font-mono text-sm font-semibold">
-          {logoText}
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-card">
+          <TechGlyph name={technology.name} size={20} decorative />
         </span>
         <div className="min-w-0">
           <p className="break-words text-sm font-semibold text-foreground">

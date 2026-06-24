@@ -43,6 +43,11 @@
   --brand: #157f4c; /* mid green, flat (no gradient) */
   --brand-foreground: #ffffff;
 
+  /* Shared "glow" color for the cursor-following effects (MagicCard spotlight +
+     GlowText). Theme-aware: a faint near-black in light mode so it reads as a
+     subtle highlight, switching to white in dark mode (see .dark). */
+  --glow: #0a0f0d;
+
   --border: #e2e8e3;
   --input: #dce5dd;
   --ring: #157f4c; /* focus ring picks up the brand green */
@@ -72,6 +77,9 @@
 
   --brand: #45c07d;
   --brand-foreground: #04140c;
+
+  /* White glow on the near-black dark surface. */
+  --glow: #ffffff;
 
   --border: #1f2b24;
   --input: #243029;
@@ -111,17 +119,46 @@
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) + 2px);
-  --animate-rippling: rippling var(--duration) ease-out;
-  @keyframes rippling {
-  0% {
-    opacity: 1;
+
+  /* Accordion expand/collapse, used by the Magic UI file tree (file-tree.tsx).
+     Radix exposes the content height as a CSS var; we animate height to/from it. */
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+  @keyframes accordion-down {
+    from {
+      height: 0;
     }
-  100% {
-    transform: scale(2);
-    opacity: 0;
+    to {
+      height: var(--radix-accordion-content-height);
     }
   }
-}
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+  --animate-marquee: marquee var(--duration) infinite linear;
+  --animate-marquee-vertical: marquee-vertical var(--duration) linear infinite
+;
+  @keyframes marquee {
+  from {
+    transform: translateX(0);
+    }
+  to {
+    transform: translateX(calc(-100% - var(--gap)));
+    }
+  }
+  @keyframes marquee-vertical {
+  from {
+    transform: translateY(0);
+    }
+  to {
+    transform: translateY(calc(-100% - var(--gap)));
+    }
+  }}
 
 /*
   Theme switch animation. The light/dark toggle (theme-toggle.tsx) wraps the

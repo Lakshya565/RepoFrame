@@ -7,6 +7,7 @@ import { ArrowRight, Loader2 } from "lucide-react";
 import { parseRepoUrl } from "@/lib/repo-api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { GlowText } from "@/components/glow-text";
 
 // Handles the initial repo URL entry flow. It sends raw user input to the backend
 // parser, then routes with only normalized owner/repo/url values. Validation and
@@ -55,7 +56,7 @@ export function RepoUrlForm() {
         className="text-sm font-medium text-foreground"
         htmlFor="repo-url"
       >
-        GitHub repository URL
+        <GlowText text="GitHub repository URL" />
       </label>
       <div className="mt-2 flex flex-col gap-2 sm:flex-row">
         <Input
@@ -100,7 +101,7 @@ export function RepoUrlForm() {
           </p>
         ) : (
           <p className="text-muted-foreground" id="repo-url-help">
-            Use the HTTPS clone or browser URL of any public GitHub repository.
+            <GlowText text="Use the HTTPS clone or browser URL of any public GitHub repository." />
           </p>
         )}
       </div>

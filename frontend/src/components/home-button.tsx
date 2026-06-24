@@ -32,7 +32,10 @@ export function HomeButton({ className }: HomeButtonProps) {
       aria-label="Home — reload RepoFrame"
       onClick={() => window.location.assign("/")}
       className={cn(
-        "group relative -ml-2 inline-flex cursor-pointer items-center rounded-md px-2 py-1 font-mono text-sm font-semibold tracking-tight transition-colors hover:text-brand",
+        // The border sits on the button itself, so as the house icon pops in and
+        // widens the button the rectangle resizes with it. `transition-colors`
+        // animates the border to brand green on hover.
+        "group relative -ml-2 inline-flex cursor-pointer items-center rounded-md border border-border px-2 py-1 text-sm font-medium tracking-tight transition-colors hover:border-brand hover:text-brand",
         className,
       )}
     >
