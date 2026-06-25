@@ -6,7 +6,7 @@ import { useReducedMotion } from "motion/react";
 
 import { IconCloud } from "@/components/ui/icon-cloud";
 import { TechGlyph } from "@/components/tech-glyph";
-import { techIconPath } from "@/lib/tech-icons";
+import { FALLBACK_ICON_PATH, techIconPath } from "@/lib/tech-icons";
 
 // Size (px) each logo SVG rasterizes at before the cloud scales it onto the
 // sphere. The cloud draws icons into a 40px cell at 0.4 scale, so 100px keeps
@@ -46,16 +46,35 @@ export function TechIconCloud({ techNames }: TechIconCloudProps) {
     const brandColor =
       resolvedTheme === "dark" ? BRAND_GREEN_DARK : BRAND_GREEN_LIGHT;
 
-    return techNames.map((name) => (
+    // Collapse every technology that has no dedicated logo into a single generic
+    // code glyph: those all resolve to FALLBACK_ICON_PATH, and repeating the same
+    // anonymous glyph around the sphere just reads as noise. Technologies with a
+    // real logo each keep their own node.
+    let fallbackAdded = false;
+    const nodes: { key: string; path: string }[] = [];
+    for (const name of techNames) {
+      const path = techIconPath(name);
+      if (path === FALLBACK_ICON_PATH) {
+        if (fallbackAdded) {
+          continue;
+        }
+        fallbackAdded = true;
+        nodes.push({ key: "__fallback__", path });
+      } else {
+        nodes.push({ key: name, path });
+      }
+    }
+
+    return nodes.map(({ key, path }) => (
       <svg
-        key={name}
+        key={key}
         xmlns="http://www.w3.org/2000/svg"
         viewBox="0 0 24 24"
         width={ICON_RENDER_SIZE}
         height={ICON_RENDER_SIZE}
         fill={brandColor}
       >
-        <path d={techIconPath(name)} />
+        <path d={path} />
       </svg>
     ));
   }, [techNames, resolvedTheme]);

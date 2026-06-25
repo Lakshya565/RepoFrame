@@ -117,9 +117,16 @@ _SYSTEM_PROMPT = (
     "  - needs_user_confirmation: plausible but only the user can confirm it (e.g. "
     "impact numbers, intent, ownership) and the user context does not settle it.\n"
     "  - unsupported: nothing in the evidence or context backs it.\n"
+    "- Judge a compound claim (one that bundles several facts, e.g. 'Built with "
+    "Python and TypeScript') by its WEAKEST part: if ANY part is unsupported or "
+    "overstated, the whole claim is at most 'partially_supported' (or 'unsupported') "
+    "— never 'supported'.\n"
     "- List the sources you actually used in supportingEvidence (file paths, or "
-    "'user context'). Give a suggestedRevision only when a claim is unsupported or "
-    "overstated; otherwise set it to null.\n\n"
+    "'user context'). Give a suggestedRevision ONLY for 'partially_supported' or "
+    "'unsupported' claims; 'supported' and 'needs_user_confirmation' claims MUST set "
+    "suggestedRevision to null. A 'supported' status together with a non-null "
+    "suggestedRevision is a contradiction: if a claim needs rewording, it is not "
+    "'supported'.\n\n"
     "When every claim is checked, respond with ONLY this JSON object and NO tool "
     "calls: {\"verifications\": [{\"claim\": string, \"status\": string, "
     "\"sections\": [string], \"supportingEvidence\": [string], "
@@ -276,9 +283,24 @@ def _assistant_tool_call_message(step: AgentStep) -> dict:
     }
 
 
+# Enforces the status/revision invariant the prompt asks for, in case the model
+# violates it anyway: a "supported" claim is, by definition, backed exactly as
+# written, so it cannot also carry a suggested rewrite. When the model returns
+# both — e.g. a compound "Python and TypeScript" claim it backs for one language
+# but not the other — the revision flags a real gap, so we trust it and downgrade
+# the status to partially_supported, keeping the badge and the advice consistent.
+def _reconcile_status(verification: ClaimVerification) -> ClaimVerification:
+    has_revision = bool((verification.suggested_revision or "").strip())
+    if verification.status == "supported" and has_revision:
+        return verification.model_copy(update={"status": "partially_supported"})
+    return verification
+
+
 # Extracts the JSON object from the model's final message and validates it against
 # ClaimVerificationResult. Tolerates the model wrapping the JSON in markdown fences
-# or stray prose by falling back to the outermost {...} block.
+# or stray prose by falling back to the outermost {...} block. Each parsed claim is
+# passed through _reconcile_status so an internally inconsistent verdict cannot
+# reach the UI.
 def _parse_verifications(content: str | None) -> list[ClaimVerification]:
     text = (content or "").strip()
     if not text:
@@ -288,9 +310,12 @@ def _parse_verifications(content: str | None) -> list[ClaimVerification]:
         if candidate is None:
             continue
         try:
-            return ClaimVerificationResult.model_validate_json(candidate).verifications
+            verifications = ClaimVerificationResult.model_validate_json(
+                candidate
+            ).verifications
         except (ValidationError, ValueError):
             continue
+        return [_reconcile_status(verification) for verification in verifications]
 
     raise LLMError(
         "The verification agent did not return a valid result.", 502

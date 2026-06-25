@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,7 +9,6 @@ import { EvidencePanel } from "@/components/evidence-panel";
 import { GeneratedOutputsCard } from "@/components/generated-outputs-card";
 import { UserContextForm } from "@/components/user-context-form";
 import {
-  EMPTY_OUTPUTS,
   INSTRUCTION_MAX_LENGTH,
   mergeSection,
   sectionHasContent,
@@ -22,38 +20,16 @@ import {
   generateProfile,
   reviseOutput,
   verifyClaims,
-  type ClaimVerification,
   type GeneratedOutputs,
-  type InterviewTopic,
   type OutputSection,
   type ProjectProfileData,
-  type UsageTotals,
 } from "@/lib/repo-api";
-import {
-  EMPTY_USER_CONTEXT,
-  userContextEquals,
-  type UserContext,
-} from "@/lib/user-context";
+import { userContextEquals } from "@/lib/user-context";
+import { useGeneration } from "@/lib/generation-context";
 
 type ProjectWriteupSectionProps = {
   repoUrl: string;
-  // Token-usage state is lifted to the analysis workspace so the developer panel
-  // can show it alongside the GitHub rate limit. This component only reports each
-  // call's usage up and signals when a generation finishes (so the lifetime total
-  // refetches); it no longer renders the token meter itself.
-  onAddUsage: (usage: UsageTotals) => void;
-  onGenerationComplete: () => void;
 };
-
-// Identifies the single generation task allowed to run at a time. The presence
-// of a task is the global lock that disables every other trigger.
-type GenerationTask =
-  | { kind: "all" }
-  | { kind: "section"; section: OutputSection }
-  | { kind: "revise"; section: OutputSection }
-  | { kind: "interview" }
-  // section null = verify every tab; a section = re-check just that tab.
-  | { kind: "verify"; section: OutputSection | null };
 
 // The four core output sections, used to tell whether anything has been generated
 // yet (which gates the opt-in verification actions).
@@ -77,9 +53,11 @@ function messageOf(caught: unknown, fallback: string): string {
   return caught instanceof Error ? caught.message : fallback;
 }
 
-// Owns the questionnaire answers (lifted from the form), the generated profile,
-// the per-section outputs, the interview topics, and the claim verifications, and
-// orchestrates every OpenAI call. Properties that matter here:
+// Orchestrates every OpenAI call for the generation workspace. The state it works
+// over (questionnaire answers, generated profile, per-section outputs, interview
+// topics, claim verifications) is held in the shared GenerationProvider so it
+// survives tab navigation; this component reads/writes it via useGeneration.
+// Properties that matter here:
 //   1. The profile is the distilled repo context. It is generated once and
 //      reused for every later call as long as the questionnaire is unchanged, so
 //      the raw repo evidence is never re-sent and OpenAI prompt-caches the
@@ -95,40 +73,35 @@ function messageOf(caught: unknown, fallback: string): string {
 // Nothing generates on load — every call is an explicit button press.
 export function ProjectWriteupSection({
   repoUrl,
-  onAddUsage,
-  onGenerationComplete,
 }: ProjectWriteupSectionProps) {
-  const [context, setContext] = useState<UserContext>(EMPTY_USER_CONTEXT);
-
-  const [profile, setProfile] = useState<ProjectProfileData | null>(null);
-  // The questionnaire snapshot the current profile was built from. The profile is
-  // reused only while this still matches the live answers.
-  const [profileContext, setProfileContext] = useState<UserContext | null>(null);
-  const [outputs, setOutputs] = useState<GeneratedOutputs>(EMPTY_OUTPUTS);
-  const [interviewTopics, setInterviewTopics] = useState<
-    InterviewTopic[] | null
-  >(null);
-  // The agent's claim verifications: null until the user runs verification.
-  const [verifications, setVerifications] = useState<ClaimVerification[] | null>(
-    null,
-  );
-  // The last-generated text per section, so the card can tell whether the user
-  // has edited a draft (which enables the feedback regenerate).
-  const [baselines, setBaselines] = useState<
-    Partial<Record<OutputSection, string>>
-  >({});
-  // Preemptive instruction applied to everything produced by "Generate all".
-  const [allGuidance, setAllGuidance] = useState("");
-
-  const [busyTask, setBusyTask] = useState<GenerationTask | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  // Reports one call's real usage up to the workspace's session meter.
-  const addUsage = onAddUsage;
-
-  // Signals the workspace that a generation finished, so the lifetime total
-  // refetches (the backend ledger was just updated by the completed call).
-  const refreshLifetime = onGenerationComplete;
+  // All generation state lives in the shared GenerationProvider (in the analysis
+  // layout) so it survives tab navigation — see generation-context.tsx. This
+  // component owns the orchestration logic below but reads/writes that shared
+  // state. addUsage/refreshLifetime feed the developer panel's token meter.
+  const {
+    context,
+    setContext,
+    profile,
+    setProfile,
+    profileContext,
+    setProfileContext,
+    outputs,
+    setOutputs,
+    interviewTopics,
+    setInterviewTopics,
+    verifications,
+    setVerifications,
+    baselines,
+    setBaselines,
+    allGuidance,
+    setAllGuidance,
+    busyTask,
+    setBusyTask,
+    error,
+    setError,
+    addUsage,
+    refreshLifetime,
+  } = useGeneration();
 
   // Returns the profile, regenerating it when the questionnaire changed since it
   // was built (so grounding stays current) and reusing it otherwise. A fresh

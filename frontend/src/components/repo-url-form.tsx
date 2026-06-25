@@ -33,13 +33,11 @@ export function RepoUrlForm() {
 
     try {
       const parsedRepo = await parseRepoUrl(repoUrl);
-      const params = new URLSearchParams({
-        owner: parsedRepo.owner,
-        repo: parsedRepo.repo,
-        normalizedUrl: parsedRepo.normalizedUrl,
-      });
-
-      router.push(`/analysis?${params.toString()}`);
+      // The analysis route carries the repo identity in the path; the full URL is
+      // rebuilt from owner/repo on the other side (see lib/repo-url.ts).
+      router.push(
+        `/analysis/${encodeURIComponent(parsedRepo.owner)}/${encodeURIComponent(parsedRepo.repo)}`,
+      );
     } catch (error) {
       setError(
         error instanceof Error

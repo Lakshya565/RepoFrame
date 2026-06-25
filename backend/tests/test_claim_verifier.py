@@ -262,6 +262,45 @@ class VerifyClaimsTests(unittest.TestCase):
         self.assertEqual(len(verifications), 1)
         self.assertGreater(usage.total_tokens, 0)
 
+    def test_supported_with_revision_is_downgraded(self) -> None:
+        # A "supported" verdict that also carries a suggestedRevision is internally
+        # inconsistent (a claim backed as written needs no rewrite). The loop must
+        # reconcile it to partially_supported so the badge agrees with the advice —
+        # the exact contradiction seen on compound "Python and TypeScript" claims.
+        inconsistent = json.dumps(
+            {
+                "verifications": [
+                    {
+                        "claim": "Utilized Python and TypeScript",
+                        "status": "supported",
+                        "sections": ["resumeBullets"],
+                        "supportingEvidence": ["package.json"],
+                        "explanation": "TypeScript is present; Python is not evidenced.",
+                        "suggestedRevision": "Drop Python; only TypeScript is shown.",
+                    }
+                ]
+            }
+        )
+        agent = ScriptedAgent(
+            [
+                AgentStep(
+                    content=inconsistent,
+                    tool_calls=[],
+                    finish_reason="stop",
+                    usage=TokenUsage(10, 10, 0, 20),
+                )
+            ]
+        )
+        verifications, _, _ = verify_claims(
+            make_evidence(), make_outputs(), UserContextInput(), agent_fn=agent
+        )
+        self.assertEqual(verifications[0].status, "partially_supported")
+        # The revision is preserved — it carries the real signal.
+        self.assertEqual(
+            verifications[0].suggested_revision,
+            "Drop Python; only TypeScript is shown.",
+        )
+
     def test_malformed_final_answer_raises_502(self) -> None:
         agent = ScriptedAgent(
             [
