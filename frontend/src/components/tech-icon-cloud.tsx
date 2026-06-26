@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 import { useReducedMotion } from "motion/react";
 
@@ -19,6 +19,13 @@ const ICON_RENDER_SIZE = 100;
 const BRAND_GREEN_LIGHT = "#157f4c";
 const BRAND_GREEN_DARK = "#45c07d";
 
+// Ripple tuning (single source of truth). While the cursor hovers the cloud, a
+// brand-green ring spawns every RIPPLE_INTERVAL_MS and expands from the center,
+// fading out over RIPPLE_LIFETIME_MS (must match the cloud-ripple keyframe's
+// intent in globals.css).
+const RIPPLE_INTERVAL_MS = 600;
+const RIPPLE_LIFETIME_MS = 1100;
+
 type TechIconCloudProps = {
   // Exact technology names from the detector (DetectedTechnology.name).
   techNames: string[];
@@ -33,6 +40,29 @@ type TechIconCloudProps = {
 export function TechIconCloud({ techNames }: TechIconCloudProps) {
   const reduce = useReducedMotion();
   const { resolvedTheme } = useTheme();
+
+  // Hover-driven ripples. While the pointer is over the cloud, a new ring id is
+  // pushed every RIPPLE_INTERVAL_MS; each ring removes itself when its animation
+  // ends. Hooks stay above the reduced-motion early return (Rules of Hooks); in
+  // that branch the cloud isn't rendered, so isHovered never flips and this idles.
+  const [isHovered, setIsHovered] = useState(false);
+  const [ripples, setRipples] = useState<number[]>([]);
+  const rippleIdRef = useRef(0);
+
+  useEffect(() => {
+    if (!isHovered) {
+      return;
+    }
+
+    const spawnRipple = () => {
+      rippleIdRef.current += 1;
+      setRipples((current) => [...current, rippleIdRef.current]);
+    };
+
+    spawnRipple(); // one immediately on enter, then on a steady cadence
+    const interval = window.setInterval(spawnRipple, RIPPLE_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [isHovered]);
 
   // Build one themed SVG element per technology. Memoized so the cloud only
   // re-rasterizes when the tech list or the active theme changes. While the
@@ -98,10 +128,35 @@ export function TechIconCloud({ techNames }: TechIconCloudProps) {
 
   // Reserve a fixed square box so there is no layout shift while the theme
   // resolves. The canvas keeps its crisp 400px internal resolution but is scaled
-  // to fit the box via CSS.
+  // to fit the box via CSS. A ripple layer sits behind the (transparent) canvas;
+  // pointer enter/leave on the wrapper drives it (canvas events bubble up here),
+  // and the layer is pointer-events-none so dragging the sphere is unaffected.
   return (
-    <div className="mx-auto aspect-square w-full max-w-[340px] [&_canvas]:h-full [&_canvas]:w-full">
-      {icons ? <IconCloud icons={icons} /> : null}
+    <div
+      className="relative mx-auto aspect-square w-full max-w-[340px]"
+      onPointerEnter={() => setIsHovered(true)}
+      onPointerLeave={() => setIsHovered(false)}
+    >
+      <div className="pointer-events-none absolute inset-0">
+        {ripples.map((id) => (
+          <span
+            key={id}
+            aria-hidden
+            onAnimationEnd={() =>
+              setRipples((current) => current.filter((rippleId) => rippleId !== id))
+            }
+            className="absolute left-1/2 top-1/2 h-full w-full rounded-full border-2"
+            style={{
+              borderColor: "var(--brand)",
+              animation: `cloud-ripple ${RIPPLE_LIFETIME_MS}ms ease-out forwards`,
+            }}
+          />
+        ))}
+      </div>
+
+      <div className="relative z-10 h-full w-full [&_canvas]:h-full [&_canvas]:w-full">
+        {icons ? <IconCloud icons={icons} /> : null}
+      </div>
     </div>
   );
 }

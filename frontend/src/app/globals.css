@@ -161,31 +161,20 @@
   }}
 
 /*
-  Theme switch animation. The light/dark toggle (theme-toggle.tsx) wraps the
-  theme change in a View Transition and animates a clip-path circle on the NEW
-  snapshot, so the incoming theme wipes out in an expanding circle from the
-  button. We disable the browser's default cross-fade here so that clip-path is
-  the only motion, and keep the new snapshot stacked above the old one. The
-  toggle falls back to an instant switch when View Transitions are unsupported,
-  and reduced-motion users skip the animation entirely (handled in JS), with the
-  media query below as a belt-and-suspenders guard.
+  Icon-cloud ripple. While the cursor hovers the sphere (tech-icon-cloud.tsx),
+  brand-green rings spawn at the cloud's center and expand outward as they fade.
+  Each ring is centered with translate(-50%, -50%) so it scales about its own
+  middle; the duration/easing are applied from the component so the timing stays a
+  single tunable constant there.
 */
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation: none;
-  mix-blend-mode: normal;
-}
-::view-transition-new(root) {
-  z-index: 1;
-}
-::view-transition-old(root) {
-  z-index: 0;
-}
-@media (prefers-reduced-motion: reduce) {
-  ::view-transition-group(*),
-  ::view-transition-old(*),
-  ::view-transition-new(*) {
-    animation: none !important;
+@keyframes cloud-ripple {
+  from {
+    transform: translate(-50%, -50%) scale(0.15);
+    opacity: 0.4;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0;
   }
 }
 

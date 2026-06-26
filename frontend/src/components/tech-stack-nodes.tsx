@@ -12,13 +12,20 @@ type TechStackNodesProps = {
   technologies: DetectedTechnology[];
 };
 
-// The detected technologies as a grid of compact, clickable tiles. Presentational
-// only — the parent owns fetching and the loading/error/empty states. The grid
-// widens with the viewport since it now spans the full overview card; items-start
-// lets an opened tile grow downward without stretching its neighbours.
+// Fixed width of each technology tile. Exported so the parent's loading skeleton
+// can reserve the same footprint. A centered flex-wrap of fixed-width tiles is
+// what lets a partial last row center instead of left-packing (a CSS grid would
+// align the final row to the start). Tune this to trade tile size vs. per-row
+// count.
+export const TECH_TILE_WIDTH = "10rem";
+
+// The detected technologies as a centered, wrapping row of compact, clickable
+// tiles. Presentational only — the parent owns fetching and the
+// loading/error/empty states. items-start lets an opened tile grow downward
+// without stretching its neighbours.
 export function TechStackNodes({ technologies }: TechStackNodesProps) {
   return (
-    <ul className="grid grid-cols-2 items-start gap-3 sm:grid-cols-3 lg:grid-cols-4">
+    <ul className="flex flex-wrap items-start justify-center gap-3">
       {technologies.map((technology) => (
         <TechStackItem key={technology.name} technology={technology} />
       ))}
@@ -39,7 +46,7 @@ function TechStackItem({ technology }: TechStackItemProps) {
   const evidenceId = useId();
 
   return (
-    <li>
+    <li style={{ width: TECH_TILE_WIDTH }}>
       <button
         type="button"
         aria-expanded={isOpen}

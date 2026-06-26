@@ -16,7 +16,7 @@ import { EmptyState, ErrorState } from "@/components/states";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TechIconCloud } from "@/components/tech-icon-cloud";
-import { TechStackNodes } from "@/components/tech-stack-nodes";
+import { TechStackNodes, TECH_TILE_WIDTH } from "@/components/tech-stack-nodes";
 
 type RepoOverviewCardProps = {
   repoUrl: string;
@@ -39,7 +39,9 @@ export function RepoOverviewCard({ repoUrl }: RepoOverviewCardProps) {
 
   return (
     <Card beam className="p-6">
-      <div className="grid items-start gap-6 lg:grid-cols-2">
+      {/* Top split is summary-weighted (the cloud caps at 340px, so an even 50/50
+          left its half looking empty); the wider gap keeps the two sides distinct. */}
+      <div className="grid items-start gap-8 lg:grid-cols-[3fr_2fr]">
         <RepoSummarySection resource={metadata} />
         <TechCloudSection
           technologies={techStack.data?.technologies ?? null}
@@ -47,13 +49,15 @@ export function RepoOverviewCard({ repoUrl }: RepoOverviewCardProps) {
         />
       </div>
 
-      <div className="mt-8">
+      {/* The nodes are their own section: a hairline divider + consistent padding
+          separate them from the summary/cloud row so the card reads as one unit. */}
+      <div className="mt-8 border-t pt-6">
         <h3 className="text-base font-semibold">Tech stack</h3>
         <p className="mt-1 text-sm text-muted-foreground">
           What your project is built with. Select any technology to see the
           evidence we found.
         </p>
-        <div className="mt-4">
+        <div className="mt-5">
           <TechNodesSection resource={techStack} />
         </div>
       </div>
@@ -189,9 +193,13 @@ function TechNodesSection({
 }) {
   if (resource.isLoading) {
     return (
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        {[0, 1, 2, 3].map((item) => (
-          <Skeleton key={item} className="h-28" />
+      <div className="flex flex-wrap justify-center gap-3">
+        {[0, 1, 2, 3, 4, 5].map((item) => (
+          <Skeleton
+            key={item}
+            className="h-28"
+            style={{ width: TECH_TILE_WIDTH }}
+          />
         ))}
       </div>
     );
