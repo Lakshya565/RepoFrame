@@ -161,20 +161,22 @@
   }}
 
 /*
-  Icon-cloud ripple. While the cursor hovers the sphere (tech-icon-cloud.tsx),
-  brand-green rings spawn at the cloud's center and expand outward as they fade.
-  Each ring is centered with translate(-50%, -50%) so it scales about its own
-  middle; the duration/easing are applied from the component so the timing stays a
-  single tunable constant there.
+  Icon-cloud ring pulse. A static set of concentric brand-green rings frames the
+  sphere (tech-icon-cloud.tsx); when the cursor crosses a ring, that ring and the
+  larger ones pulse in an outward-rippling wave. Each ring stays centered via
+  translate(-50%, -50%) (so it scales about its own middle) and returns to its own
+  resting opacity, which the component passes in as the --ring-base custom
+  property. Duration/easing/stagger live as tunable constants in the component.
 */
-@keyframes cloud-ripple {
-  from {
-    transform: translate(-50%, -50%) scale(0.15);
-    opacity: 0.4;
-  }
-  to {
+@keyframes ring-pulse {
+  0%,
+  100% {
+    opacity: var(--ring-base);
     transform: translate(-50%, -50%) scale(1);
-    opacity: 0;
+  }
+  45% {
+    opacity: 0.9;
+    transform: translate(-50%, -50%) scale(1.06);
   }
 }
 

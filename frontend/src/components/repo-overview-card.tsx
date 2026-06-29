@@ -4,19 +4,17 @@ import { ExternalLink } from "lucide-react";
 
 import {
   fetchRepoMetadata,
-  fetchTechStack,
   type DetectedTechnology,
   type RepoMetadataResponse,
-  type TechStackResponse,
 } from "@/lib/repo-api";
 import { useRepoResource, type RepoResource } from "@/lib/use-repo-resource";
+import { useTechStack } from "@/lib/tech-stack-context";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { EmptyState, ErrorState } from "@/components/states";
+import { ErrorState } from "@/components/states";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TechIconCloud } from "@/components/tech-icon-cloud";
-import { TechStackNodes, TECH_TILE_WIDTH } from "@/components/tech-stack-nodes";
 
 type RepoOverviewCardProps = {
   repoUrl: string;
@@ -25,17 +23,16 @@ type RepoOverviewCardProps = {
 const numberFormatter = new Intl.NumberFormat("en-US");
 
 const METADATA_ERROR = "RepoFrame could not fetch repository metadata.";
-const TECH_STACK_ERROR = "RepoFrame could not detect the repository tech stack.";
 
-// The single "overview" card for the Analysis tab. It unifies what used to be two
-// separate cards: the repository summary and the icon cloud sit side by side on
-// top (roughly equal halves on desktop), with the clickable technology nodes
-// spanning the full width below. Repo metadata and the tech stack are two
-// independent fetches, so each region carries its own loading/error/empty state
-// inside the one shared card — there is no card-inside-a-card nesting.
+// The repository "overview" hero card for the Analysis tab: the repository
+// summary and the tech-stack icon cloud sit side by side (roughly equal halves on
+// desktop). Repo metadata is fetched here; the tech stack comes from the shared
+// TechStackProvider (the same single fetch the Tech stack section below uses), so
+// the GitHub-backed detection only runs once. The clickable technology nodes live
+// in their own "Tech stack" section below this card (see TechStackCard).
 export function RepoOverviewCard({ repoUrl }: RepoOverviewCardProps) {
   const metadata = useRepoResource(repoUrl, fetchRepoMetadata, METADATA_ERROR);
-  const techStack = useRepoResource(repoUrl, fetchTechStack, TECH_STACK_ERROR);
+  const techStack = useTechStack();
 
   return (
     <Card beam className="p-6">
@@ -47,19 +44,6 @@ export function RepoOverviewCard({ repoUrl }: RepoOverviewCardProps) {
           technologies={techStack.data?.technologies ?? null}
           isLoading={techStack.isLoading}
         />
-      </div>
-
-      {/* The nodes are their own section: a hairline divider + consistent padding
-          separate them from the summary/cloud row so the card reads as one unit. */}
-      <div className="mt-8 border-t pt-6">
-        <h3 className="text-base font-semibold">Tech stack</h3>
-        <p className="mt-1 text-sm text-muted-foreground">
-          What your project is built with. Select any technology to see the
-          evidence we found.
-        </p>
-        <div className="mt-5">
-          <TechNodesSection resource={techStack} />
-        </div>
       </div>
     </Card>
   );
@@ -182,48 +166,4 @@ function TechCloudSection({
   return (
     <TechIconCloud techNames={technologies.map((technology) => technology.name)} />
   );
-}
-
-// Bottom: the clickable technology nodes, plus the stack's loading/error/empty
-// states (which also cover the cloud above, since both read the same fetch).
-function TechNodesSection({
-  resource,
-}: {
-  resource: RepoResource<TechStackResponse>;
-}) {
-  if (resource.isLoading) {
-    return (
-      <div className="flex flex-wrap justify-center gap-3">
-        {[0, 1, 2, 3, 4, 5].map((item) => (
-          <Skeleton
-            key={item}
-            className="h-28"
-            style={{ width: TECH_TILE_WIDTH }}
-          />
-        ))}
-      </div>
-    );
-  }
-
-  if (resource.error) {
-    return (
-      <ErrorState
-        title="Stack detection unavailable"
-        message={resource.error}
-        onRetry={resource.reload}
-      />
-    );
-  }
-
-  const stack = resource.data;
-  if (!stack || stack.technologies.length === 0) {
-    return (
-      <EmptyState
-        title="No stack detected yet"
-        description="RepoFrame did not find stack evidence in the ranked README, dependency, configuration, or source-path signals for this repository."
-      />
-    );
-  }
-
-  return <TechStackNodes technologies={stack.technologies} />;
 }
