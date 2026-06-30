@@ -1,6 +1,13 @@
+import asyncio
+import json
+import logging
+import queue
+import threading
 from collections import Counter
+from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 
 from app.config import OPENAI_MODEL
 from app.schemas.outputs import (
@@ -19,8 +26,14 @@ from app.schemas.profile import (
 from app.schemas.usage import UsageTotals
 from app.schemas.verify import VerifyClaimsRequest, VerifyClaimsResponse
 from app.services import metrics_store, usage_store
-from app.services.claim_verifier import verify_claims
-from app.services.file_content_service import collect_file_evidence
+from app.services.claim_verifier import (
+    VERIFY_STAGE_EVIDENCE,
+    verify_claims,
+)
+from app.services.file_content_service import (
+    RepoEvidenceCollection,
+    collect_file_evidence,
+)
 from app.services.file_ranker import rank_important_files
 from app.services.github_service import (
     GitHubFileContentError,
@@ -46,6 +59,8 @@ from app.services.tech_stack_detector import (
 )
 
 router = APIRouter(prefix="/api/generate", tags=["generate"])
+
+logger = logging.getLogger(__name__)
 
 
 # Generates the Phase 10 structured project profile. The route reuses the same
@@ -223,29 +238,50 @@ def generate_interview_prep_endpoint(
     )
 
 
-# Phase 12 agentic claim verification. Re-runs the deterministic pipeline (parse ->
-# metadata -> tree -> rank -> bounded evidence) to rebuild the same already-selected
-# evidence bundle the profile was grounded in, then hands it plus the generated
-# outputs to the bounded verification agent. Like interview prep this is opt-in: the
-# frontend calls it only when the user clicks "Verify claims", so it never spends
-# tokens in the default flow. The agent loop, tools, and caps live in claim_verifier.
+# Re-runs the deterministic pipeline (parse -> metadata -> tree -> rank -> bounded
+# evidence) to rebuild the same already-selected evidence bundle the profile was
+# grounded in. Shared by both verify endpoints (one-shot and streaming) so the
+# evidence rebuild stays identical. Raises the same domain errors the callers map.
+def _gather_verify_evidence(repo_url: str) -> RepoEvidenceCollection:
+    parsed_repo = parse_github_repo_url(repo_url)
+    metadata = fetch_repo_metadata(parsed_repo.owner, parsed_repo.repo)
+    tree = fetch_repo_tree(
+        parsed_repo.owner,
+        parsed_repo.repo,
+        metadata.default_branch,
+    )
+    ranked_files = rank_important_files(tree.files)
+    return collect_file_evidence(
+        parsed_repo.owner,
+        parsed_repo.repo,
+        metadata.default_branch,
+        ranked_files,
+    )
+
+
+# Records claim-quality metrics (Phase 13): how many claims were checked and the
+# breakdown by verification status. Shared by both verify endpoints.
+def _record_claim_metrics(verifications: list) -> None:
+    status_counts = Counter(item.status for item in verifications)
+    metrics_store.increment(
+        claims_verified=len(verifications),
+        claims_supported=status_counts["supported"],
+        claims_partially_supported=status_counts["partially_supported"],
+        claims_needs_confirmation=status_counts["needs_user_confirmation"],
+        claims_unsupported=status_counts["unsupported"],
+    )
+
+
+# Phase 12 agentic claim verification. Rebuilds the evidence bundle, then hands it
+# plus the generated outputs to the bounded verification agent. Like interview prep
+# this is opt-in: the frontend calls it only when the user clicks "Verify claims",
+# so it never spends tokens in the default flow. The agent loop, tools, and caps
+# live in claim_verifier. This is the one-shot variant (the whole result at once);
+# /verify/stream below runs the same work but streams real progress as it goes.
 @router.post("/verify", response_model=VerifyClaimsResponse)
 def verify_claims_endpoint(request: VerifyClaimsRequest) -> VerifyClaimsResponse:
     try:
-        parsed_repo = parse_github_repo_url(request.repo_url)
-        metadata = fetch_repo_metadata(parsed_repo.owner, parsed_repo.repo)
-        tree = fetch_repo_tree(
-            parsed_repo.owner,
-            parsed_repo.repo,
-            metadata.default_branch,
-        )
-        ranked_files = rank_important_files(tree.files)
-        evidence = collect_file_evidence(
-            parsed_repo.owner,
-            parsed_repo.repo,
-            metadata.default_branch,
-            ranked_files,
-        )
+        evidence = _gather_verify_evidence(request.repo_url)
         with metrics_store.timed("llm"):
             verifications, estimated_input_tokens, usage = verify_claims(
                 evidence, request.outputs, request.user_context, request.sections
@@ -262,20 +298,105 @@ def verify_claims_endpoint(request: VerifyClaimsRequest) -> VerifyClaimsResponse
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
     usage_store.record(usage)
-    # Record claim-quality metrics (Phase 13): how many claims were checked and the
-    # breakdown by verification status.
-    status_counts = Counter(item.status for item in verifications)
-    metrics_store.increment(
-        claims_verified=len(verifications),
-        claims_supported=status_counts["supported"],
-        claims_partially_supported=status_counts["partially_supported"],
-        claims_needs_confirmation=status_counts["needs_user_confirmation"],
-        claims_unsupported=status_counts["unsupported"],
-    )
+    _record_claim_metrics(verifications)
 
     return VerifyClaimsResponse(
         verifications=verifications,
         model=OPENAI_MODEL,
         estimated_input_tokens=estimated_input_tokens,
         usage=UsageTotals.from_usage(usage),
+    )
+
+
+# Streaming counterpart to /verify. Runs the IDENTICAL work (rebuild evidence, then
+# the bounded agent loop) but emits Server-Sent Events as each real milestone is
+# reached, so the UI checklist tracks the agent's actual progress instead of a timed
+# guess. Events are one JSON object per SSE `data:` frame:
+#   - {"type": "progress", "stage": <stage>, "detail": <str|null>}  as work happens
+#   - {"type": "result", ...VerifyClaimsResponse}                   on success
+#   - {"type": "error", "detail": <str>, "status": <int>}          on failure
+# The success payload is exactly the /verify response shape, so the client reuses
+# the same parsing. Still opt-in: nothing runs until the user presses the button.
+#
+# The pipeline and OpenAI SDK are synchronous/blocking, so the work runs on a worker
+# thread that pushes events into a queue; the async generator drains the queue onto
+# the response without blocking the event loop. usage/metrics are recorded on the
+# worker exactly as the one-shot endpoint does.
+@router.post("/verify/stream")
+async def verify_claims_stream_endpoint(
+    request: VerifyClaimsRequest,
+) -> StreamingResponse:
+    event_queue: queue.Queue = queue.Queue()
+
+    def emit(payload: dict) -> None:
+        event_queue.put(payload)
+
+    def run_verification() -> None:
+        try:
+            # The evidence rebuild is the first real stage; signal it before the
+            # (blocking) GitHub work so the checklist lights up immediately.
+            emit({"type": "progress", "stage": VERIFY_STAGE_EVIDENCE, "detail": None})
+            evidence = _gather_verify_evidence(request.repo_url)
+
+            def on_progress(stage: str, detail: str | None) -> None:
+                emit({"type": "progress", "stage": stage, "detail": detail})
+
+            with metrics_store.timed("llm"):
+                verifications, estimated_input_tokens, usage = verify_claims(
+                    evidence,
+                    request.outputs,
+                    request.user_context,
+                    request.sections,
+                    progress=on_progress,
+                )
+
+            usage_store.record(usage)
+            _record_claim_metrics(verifications)
+
+            response = VerifyClaimsResponse(
+                verifications=verifications,
+                model=OPENAI_MODEL,
+                estimated_input_tokens=estimated_input_tokens,
+                usage=UsageTotals.from_usage(usage),
+            )
+            emit({"type": "result", **response.model_dump(by_alias=True)})
+        except RepoUrlParseError as exc:
+            emit({"type": "error", "detail": str(exc), "status": 400})
+        except (
+            GitHubMetadataError,
+            GitHubTreeError,
+            GitHubFileContentError,
+            LLMError,
+        ) as exc:
+            emit({"type": "error", "detail": str(exc), "status": exc.status_code})
+        except Exception:  # noqa: BLE001 - last-resort guard so the stream always ends
+            logger.exception("Unexpected error during streamed claim verification")
+            emit(
+                {
+                    "type": "error",
+                    "detail": "Verification failed due to an unexpected error.",
+                    "status": 500,
+                }
+            )
+        finally:
+            # Sentinel: tells the async generator the worker is done.
+            event_queue.put(None)
+
+    async def event_source() -> AsyncIterator[str]:
+        loop = asyncio.get_running_loop()
+        worker = threading.Thread(target=run_verification, daemon=True)
+        worker.start()
+        while True:
+            # Block for the next event on a threadpool slot so the event loop stays
+            # free to flush already-queued frames to the client.
+            event = await loop.run_in_executor(None, event_queue.get)
+            if event is None:
+                break
+            yield f"data: {json.dumps(event)}\n\n"
+
+    # text/event-stream + no buffering so each frame reaches the browser as emitted.
+    return StreamingResponse(
+        event_source(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

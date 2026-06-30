@@ -1,12 +1,16 @@
 "use client";
 
+import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ClaimVerificationPanel } from "@/components/claim-verification-panel";
-import { EvidencePanel } from "@/components/evidence-panel";
-import { GeneratedOutputsCard } from "@/components/generated-outputs-card";
+import { GeneratedOutputCards } from "@/components/generated-output-cards";
+import { VerificationAgent } from "@/components/verification-agent";
+import {
+  GenerateStepper,
+  type GenerateStepId,
+} from "@/components/generate-stepper";
 import { UserContextForm } from "@/components/user-context-form";
 import {
   INSTRUCTION_MAX_LENGTH,
@@ -19,12 +23,13 @@ import {
   generateOutputs,
   generateProfile,
   reviseOutput,
-  verifyClaims,
+  verifyClaimsStream,
   type GeneratedOutputs,
   type OutputSection,
   type ProjectProfileData,
+  type VerifyStage,
 } from "@/lib/repo-api";
-import { userContextEquals } from "@/lib/user-context";
+import { hasAnyUserContext, userContextEquals } from "@/lib/user-context";
 import { useGeneration } from "@/lib/generation-context";
 
 type ProjectWriteupSectionProps = {
@@ -32,7 +37,7 @@ type ProjectWriteupSectionProps = {
 };
 
 // The four core output sections, used to tell whether anything has been generated
-// yet (which gates the opt-in verification actions).
+// yet (which gates the verification agent and seeds the landing step).
 const OUTPUT_SECTIONS: OutputSection[] = [
   "resumeBullets",
   "readmeIntro",
@@ -40,23 +45,17 @@ const OUTPUT_SECTIONS: OutputSection[] = [
   "linkedinDescription",
 ];
 
-// Short button labels for the per-tab "Verify this tab" controls, in display order.
-const SECTION_VERIFY_LABELS: { section: OutputSection; label: string }[] = [
-  { section: "resumeBullets", label: "Resume" },
-  { section: "readmeIntro", label: "README" },
-  { section: "portfolioBlurb", label: "Portfolio" },
-  { section: "linkedinDescription", label: "LinkedIn" },
-];
-
 // Reads an Error message with a fallback.
 function messageOf(caught: unknown, fallback: string): string {
   return caught instanceof Error ? caught.message : fallback;
 }
 
-// Orchestrates every OpenAI call for the generation workspace. The state it works
-// over (questionnaire answers, generated profile, per-section outputs, interview
+// Orchestrates every OpenAI call for the generation workspace, presented as a
+// guided two-step flow (1 Context · 2 Generate). The state it works over
+// (questionnaire answers, generated profile, per-section outputs, interview
 // topics, claim verifications) is held in the shared GenerationProvider so it
-// survives tab navigation; this component reads/writes it via useGeneration.
+// survives tab navigation; this component reads/writes it via useGeneration. The
+// step is local UI state — the stepper only re-skins the same handlers.
 // Properties that matter here:
 //   1. The profile is the distilled repo context. It is generated once and
 //      reused for every later call as long as the questionnaire is unchanged, so
@@ -65,9 +64,9 @@ function messageOf(caught: unknown, fallback: string): string {
 //      call so grounding stays current.
 //   2. Only one generation runs at a time (busyTask); every trigger is disabled
 //      while a call is in flight, so rapid clicks cannot stack up calls.
-//   3. An optional instruction is folded into the prompt up front (per-tab and a
-//      shared one for "Generate all"), so the user can one-shot a result to spec
-//      instead of generating then regenerating.
+//   3. An optional instruction is folded into the prompt up front (per-card and a
+//      shared one for "Generate everything"), so the user can one-shot a result
+//      to spec instead of generating then regenerating.
 //   4. Every call's real token usage is accumulated into a per-session meter, and
 //      the persistent lifetime total is refreshed after each call (Phase 12).
 // Nothing generates on load — every call is an explicit button press.
@@ -103,6 +102,65 @@ export function ProjectWriteupSection({
     refreshLifetime,
   } = useGeneration();
 
+  // Whether anything has been generated yet. Gates the verification agent (there
+  // must be a draft to check) and seeds a sensible landing step for returning
+  // users whose outputs survived tab navigation.
+  const hasAnyOutput = OUTPUT_SECTIONS.some((section) =>
+    sectionHasContent(outputs, section),
+  );
+
+  // Guided-flow step. Local UI state (the generated content itself persists in
+  // the provider). Returning users — whose outputs/context survived tab
+  // navigation — land on the Generate step their progress already unlocked.
+  const [currentStep, setCurrentStep] = useState<GenerateStepId>(() =>
+    hasAnyOutput || hasAnyUserContext(context) ? 2 : 1,
+  );
+  // The Generate step unlocks once the user leaves Context (explicitly, via
+  // Continue) or already has content from a previous visit. Context stays
+  // optional — Continue works with an empty questionnaire.
+  const [contextAcknowledged, setContextAcknowledged] = useState(
+    () => hasAnyUserContext(context) || hasAnyOutput,
+  );
+
+  // Live verification-agent progress from the streaming verify endpoint. Transient
+  // local UI state (the settled verifications themselves live in the provider);
+  // both reset when a run starts and again when it ends.
+  const [verifyStage, setVerifyStage] = useState<VerifyStage | null>(null);
+  const [verifyDetail, setVerifyDetail] = useState<string | null>(null);
+
+  // Step access rules: Context is always open; Generate unlocks once Context is
+  // acknowledged. Completed steps stay accessible (jump back); a locked step
+  // blocks jumping ahead.
+  function isStepAccessible(id: GenerateStepId): boolean {
+    if (id === 1) {
+      return true;
+    }
+    return contextAcknowledged;
+  }
+
+  // A step is "complete" once its work is done — drives the stepper check marks.
+  function isStepComplete(id: GenerateStepId): boolean {
+    if (id === 1) {
+      return contextAcknowledged;
+    }
+    return hasAnyOutput;
+  }
+
+  // Navigates to a step only when it is unlocked (the stepper already disables
+  // locked steps, but guard here too so it is the single gate).
+  function goToStep(id: GenerateStepId) {
+    if (isStepAccessible(id)) {
+      setCurrentStep(id);
+    }
+  }
+
+  // Leaves the Context step for Generate. Context is optional, so this advances
+  // regardless of how much was filled in.
+  function handleContinueFromContext() {
+    setContextAcknowledged(true);
+    setCurrentStep(2);
+  }
+
   // Returns the profile, regenerating it when the questionnaire changed since it
   // was built (so grounding stays current) and reusing it otherwise. A fresh
   // generation's usage is added to the session meter.
@@ -127,7 +185,7 @@ export function ProjectWriteupSection({
 
   // Generates everything: a fresh profile (so questionnaire edits are picked up),
   // all core outputs, then interview prep — sequentially, with the shared
-  // guidance applied throughout.
+  // guidance applied throughout. Each card auto-expands as its content lands.
   async function handleGenerateAll() {
     if (busyTask) {
       return;
@@ -252,32 +310,38 @@ export function ProjectWriteupSection({
     }
   }
 
-  // Runs the bounded verification agent over the current outputs. Opt-in: it only
-  // fires on an explicit press, never as part of the default flow, so it cannot
-  // spend tokens without a deliberate click. A section scopes the run to one tab
-  // (a targeted re-check); null verifies every tab at once. Either way the result
-  // replaces the panel, and the per-claim tab badges show what was covered. The
-  // backend rebuilds the repo evidence from the URL and checks each claim.
-  async function handleVerifyClaims(section: OutputSection | null) {
+  // Runs the bounded verification agent over every generated output. Opt-in: it
+  // only fires on an explicit press, never as part of the default flow, so it
+  // cannot spend tokens without a deliberate click. Uses the STREAMING endpoint so
+  // the agent panel's checklist tracks the agent's real progress (rebuild evidence
+  // -> extract claims -> check each -> compile) as it happens, then the settled
+  // result replaces the panel. The backend rebuilds the repo evidence from the URL.
+  async function handleVerifyClaims() {
     if (busyTask) {
       return;
     }
-    setBusyTask({ kind: "verify", section });
+    setBusyTask({ kind: "verify", section: null });
     setError(null);
+    // Seed the first stage so the checklist lights up the moment the run starts,
+    // before the first server event arrives.
+    setVerifyStage("gathering_evidence");
+    setVerifyDetail(null);
 
     try {
-      const response = await verifyClaims(
-        repoUrl,
-        context,
-        outputs,
-        section ? [section] : undefined,
-      );
+      const response = await verifyClaimsStream(repoUrl, context, outputs, {
+        onProgress: (event) => {
+          setVerifyStage(event.stage);
+          setVerifyDetail(event.detail);
+        },
+      });
       setVerifications(response.verifications);
       addUsage(response.usage);
     } catch (caught) {
       setError(messageOf(caught, "RepoFrame could not verify the claims."));
     } finally {
       setBusyTask(null);
+      setVerifyStage(null);
+      setVerifyDetail(null);
       refreshLifetime();
     }
   }
@@ -286,142 +350,173 @@ export function ProjectWriteupSection({
   const generatingSection =
     busyTask?.kind === "section" ? busyTask.section : null;
   const revisingSection = busyTask?.kind === "revise" ? busyTask.section : null;
-  // Verification only makes sense once there is at least one generated output to
-  // check, so the button stays disabled until then.
-  const hasAnyOutput = OUTPUT_SECTIONS.some((section) =>
-    sectionHasContent(outputs, section),
-  );
 
   return (
     <div className="space-y-6">
-      <UserContextForm context={context} onContextChange={setContext} />
+      <GenerateStepper
+        currentStep={currentStep}
+        isStepAccessible={isStepAccessible}
+        isStepComplete={isStepComplete}
+        onStepSelect={goToStep}
+      />
 
-      <Card beam className="p-6">
-        <h3 className="text-lg font-semibold">Turn this repo into a writeup</h3>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          Generate each piece on its own from the tabs below, or generate
-          everything at once. Only one runs at a time.
-        </p>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          The first generation takes a little longer (around 20 seconds) while we
-          read and understand your project. After that, it&apos;s faster.
-        </p>
-
-        <div className="mt-5">
-          <label
-            className="text-sm font-medium"
-            htmlFor="generate-all-guidance"
-          >
-            Instructions for the model (optional)
-          </label>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Added to the prompt for everything produced by Generate all.
-          </p>
-          <Textarea
-            className="mt-2 resize-y"
-            disabled={busy}
-            id="generate-all-guidance"
-            maxLength={INSTRUCTION_MAX_LENGTH}
-            onChange={(event) => setAllGuidance(event.target.value)}
-            placeholder="e.g. write for a backend role, keep everything concise"
-            value={allGuidance}
-          />
-          <div className="mt-1 text-right text-xs text-muted-foreground">
-            {allGuidance.length}/{INSTRUCTION_MAX_LENGTH}
-          </div>
-        </div>
-
-        <Button
-          variant="brand"
-          className="mt-3"
-          disabled={busy}
-          onClick={handleGenerateAll}
+      {/* Shared across steps: any handler can set it, so it lives once here under
+          the stepper instead of inside a single step. */}
+      {error ? (
+        <p
+          className="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
+          role="alert"
         >
-          {busyTask?.kind === "all" ? (
-            <>
-              <Loader2 className="animate-spin" />
-              Generating…
-            </>
-          ) : (
-            "Generate everything"
-          )}
-        </Button>
+          {error}
+        </p>
+      ) : null}
 
-        {error ? (
-          <p
-            className="mt-4 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
-            role="alert"
-          >
-            {error}
-          </p>
-        ) : null}
-
-        <div className="mt-6 space-y-6">
-          <GeneratedOutputsCard
-            baselines={baselines}
-            busy={busy}
-            generatingInterview={busyTask?.kind === "interview"}
-            generatingSection={generatingSection}
-            interviewTopics={interviewTopics}
-            onGenerateInterview={handleGenerateInterview}
-            onGenerateSection={handleGenerateSection}
-            onOutputsChange={(next) => setOutputs(next)}
-            onReviseSection={handleReviseSection}
-            outputs={outputs}
-            revisingSection={revisingSection}
+      {/* Keyed by step so switching panels re-runs the fade-in (a light
+          crossfade; static under reduced motion). */}
+      <div
+        key={currentStep}
+        className="duration-200 animate-in fade-in-0 motion-reduce:animate-none"
+      >
+        {currentStep === 1 ? (
+          <ContextStep
+            context={context}
+            onContextChange={setContext}
+            onContinue={handleContinueFromContext}
           />
+        ) : (
+          <div className="space-y-6">
+            <GenerateEverythingCard
+              allGuidance={allGuidance}
+              busy={busy}
+              generatingAll={busyTask?.kind === "all"}
+              onGenerateAll={handleGenerateAll}
+              onGuidanceChange={setAllGuidance}
+            />
 
-          {profile ? <EvidencePanel evidence={profile.evidence} /> : null}
+            <GeneratedOutputCards
+              baselines={baselines}
+              busy={busy}
+              generatingInterview={busyTask?.kind === "interview"}
+              generatingSection={generatingSection}
+              interviewTopics={interviewTopics}
+              onGenerateInterview={handleGenerateInterview}
+              onGenerateSection={handleGenerateSection}
+              onOutputsChange={setOutputs}
+              onReviseSection={handleReviseSection}
+              outputs={outputs}
+              revisingSection={revisingSection}
+            />
 
-          {/* Opt-in claim verification: explicit actions, so it never spends
-              tokens on its own. "Verify all claims" checks every tab in one call
-              (a shared fact is verified once and tagged with each tab it appears
-              in); the per-tab buttons re-check a single tab. */}
-          <div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                disabled={busy || !hasAnyOutput}
-                onClick={() => handleVerifyClaims(null)}
-              >
-                {busyTask?.kind === "verify" && busyTask.section === null ? (
-                  <>
-                    <Loader2 className="animate-spin" />
-                    Verifying…
-                  </>
-                ) : (
-                  "Verify all claims"
-                )}
-              </Button>
-
-              {SECTION_VERIFY_LABELS.map(({ section, label }) =>
-                sectionHasContent(outputs, section) ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={busy}
-                    key={section}
-                    onClick={() => handleVerifyClaims(section)}
-                  >
-                    {busyTask?.kind === "verify" && busyTask.section === section
-                      ? "Verifying…"
-                      : `Verify ${label}`}
-                  </Button>
-                ) : null,
-              )}
-            </div>
-            <p className="mt-2 text-sm text-muted-foreground">
-              We check each generated claim against your repository and the
-              context you gave us. This runs only when you ask.
-            </p>
+            <VerificationAgent
+              busy={busy}
+              detail={verifyDetail}
+              hasOutputs={hasAnyOutput}
+              onRun={handleVerifyClaims}
+              running={busyTask?.kind === "verify"}
+              stage={verifyStage}
+              verifications={verifications}
+            />
           </div>
-
-          <ClaimVerificationPanel
-            loading={busyTask?.kind === "verify"}
-            verifications={verifications}
-          />
-        </div>
-      </Card>
+        )}
+      </div>
     </div>
+  );
+}
+
+type ContextStepProps = {
+  context: Parameters<typeof UserContextForm>[0]["context"];
+  onContextChange: Parameters<typeof UserContextForm>[0]["onContextChange"];
+  onContinue: () => void;
+};
+
+// Step 1 — the questionnaire plus a Continue affordance. Context is optional, so
+// Continue advances even with nothing filled in; the helper text says so.
+function ContextStep({
+  context,
+  onContextChange,
+  onContinue,
+}: ContextStepProps) {
+  return (
+    <div className="space-y-4">
+      <UserContextForm context={context} onContextChange={onContextChange} />
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <Button variant="brand" onClick={onContinue}>
+          Continue to generate
+        </Button>
+        <p className="text-sm text-muted-foreground">
+          Context is optional — you can continue without filling everything in.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+type GenerateEverythingCardProps = {
+  allGuidance: string;
+  busy: boolean;
+  generatingAll: boolean;
+  onGuidanceChange: (value: string) => void;
+  onGenerateAll: () => void;
+};
+
+// The kickoff card at the top of the Generate step. It produces every output at
+// once with the shared guidance applied throughout — a convenience over the
+// per-card Generate buttons below, which can each run on their own.
+function GenerateEverythingCard({
+  allGuidance,
+  busy,
+  generatingAll,
+  onGuidanceChange,
+  onGenerateAll,
+}: GenerateEverythingCardProps) {
+  return (
+    <Card beam className="p-6">
+      <h3 className="text-lg font-semibold">Turn this repo into a writeup</h3>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+        Generate everything at once, or generate any single piece on its own from
+        its card below. Only one generation runs at a time.
+      </p>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+        The first generation takes a little longer (around 20 seconds) while we
+        read and understand your project. After that, it&apos;s faster.
+      </p>
+
+      <div className="mt-5">
+        <label className="text-sm font-medium" htmlFor="generate-all-guidance">
+          Instructions for the model (optional)
+        </label>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Added to the prompt for everything produced by Generate everything.
+        </p>
+        <Textarea
+          className="mt-2 resize-y"
+          disabled={busy}
+          id="generate-all-guidance"
+          maxLength={INSTRUCTION_MAX_LENGTH}
+          onChange={(event) => onGuidanceChange(event.target.value)}
+          placeholder="e.g. write for a backend role, keep everything concise"
+          value={allGuidance}
+        />
+        <div className="mt-1 text-right text-xs text-muted-foreground">
+          {allGuidance.length}/{INSTRUCTION_MAX_LENGTH}
+        </div>
+      </div>
+
+      <Button
+        variant="brand"
+        className="mt-3"
+        disabled={busy}
+        onClick={onGenerateAll}
+      >
+        {generatingAll ? (
+          <>
+            <Loader2 className="animate-spin" />
+            Generating…
+          </>
+        ) : (
+          "Generate everything"
+        )}
+      </Button>
+    </Card>
   );
 }

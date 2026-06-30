@@ -18,28 +18,62 @@ from app.services.llm_client import (
 # budgeting, and error handling live in llm_client; this module owns the prompts
 # and the section scoping.
 
-
 # Each requestable section maps to (a) the instruction the model receives and
 # (b) the GeneratedOutputs attribute it fills. Driving both the prompt and the
 # response filtering from one table keeps the section set defined in a single place.
 _SECTION_INSTRUCTIONS = {
     "resumeBullets": (
-        "resumeBullets: an array of 3-5 concise, action-oriented resume bullet "
-        "strings. Begin each with a strong past-tense verb, keep each to a single "
-        "line, and include numbers only when they appear in the profile."
+        "resumeBullets: an array of 3-5 concise, action-oriented resume bullet strings. "
+        "Each bullet should describe concrete technical work from the project profile, not vague effort. "
+        "Begin each bullet with a strong past-tense engineering verb such as Built, Implemented, Designed, "
+        "Integrated, Developed, Created, Optimized, or Added. This list is NOT comprehensive, use what you see"
+        "fit and keep it varied.Keep each bullet to one line when possible. "
+        "Mention the most relevant technologies only when they are supported by the detected tech stack or evidence. "
+        "Emphasize software engineering work such as API design, backend logic, frontend flows, data modeling, "
+        "repo analysis, file ranking, structured generation, evidence mapping, deployment, or metrics when applicable. "
+        "Include numbers, percentages, counts, or scale only if they appear in the project profile, user context, "
+        "or verified evidence. Do not invent impact metrics. Do not exaggerate the user's role. "
+        "Avoid generic phrases like 'leveraged AI,' 'streamlined workflows,' or 'enhanced user experience' unless "
+        "the profile clearly supports the claim. The bullets should sound resume-ready, technical, and credible."
     ),
+
     "readmeIntro": (
-        "readmeIntro: a Markdown string for the top of a README — an H1 title, a "
-        "one-line description, a short paragraph on what the project does and why, "
-        "and a brief bulleted list of core features."
+        "readmeIntro: a Markdown string intended for the top section of a README. "
+        "Start with an H1 title using the project name. Under it, write a one-line description that clearly explains "
+        "what the project does. Then write a short paragraph explaining the problem the project solves, the intended "
+        "user, and the main technical approach. Keep the wording clear and developer-focused rather than promotional. "
+        "After the paragraph, include a brief Markdown bulleted list of core features. Each feature should be grounded "
+        "in the project profile or evidence, such as repo analysis, GitHub API integration, file ranking, tech stack "
+        "detection, structured output generation, claim verification, saved sessions, or deployment. "
+        "Do not include setup instructions, installation commands, badges, screenshots, license text, or future roadmap "
+        "items unless they are explicitly present in the project profile. Do not oversell unfinished features. "
+        "The result should feel like a clean README intro that a developer would actually want at the top of the repo."
     ),
+
     "portfolioBlurb": (
-        "portfolioBlurb: a plain-text blurb of 2-4 sentences suitable for a "
-        "portfolio project card."
+        "portfolioBlurb: a plain-text blurb of 4-6 sentences suitable for a portfolio project card. "
+        "The first sentence should quickly explain what the project is and who it is for. "
+        "The next sentence or two should highlight the most interesting technical parts, such as the stack, "
+        "repo analysis pipeline, AI generation workflow, evidence mapping, agentic verification, API integrations, "
+        "or deployment. Keep the tone polished but natural. It should sound like a student/developer explaining "
+        "a real project, not like marketing copy. "
+        "Do not include unsupported metrics or claims. Do not use buzzwords unless they are directly relevant. "
+        "Avoid phrases like 'revolutionizes,' 'seamlessly,' 'cutting-edge,' or 'powerful platform.' "
+        "Make the blurb specific enough that someone reading a portfolio could understand why the project is useful "
+        "and what technical work went into it."
     ),
+
     "linkedinDescription": (
-        "linkedinDescription: a LinkedIn-style project description of 1-2 short "
-        "first-person paragraphs."
+        "linkedinDescription: a LinkedIn-style project description of 1-2 short first-person paragraphs. "
+        "Write in a natural, student-friendly voice. The user should sound like they are explaining what they built, "
+        "why they built it, and what they learned from it. The first paragraph should describe the motivation and "
+        "main idea of the project. The second paragraph, if needed, should describe the technical implementation, "
+        "including the most relevant stack choices, APIs, backend/frontend architecture, "
+        "LLM generation, evidence grounding, agentic workflows, metrics, or deployment. "
+        "Keep the post grounded and not overly polished. Avoid corporate language, hype, and generic AI phrases. "
+        "Do not claim real users, production scale, performance improvements, or business impact unless the project "
+        "profile explicitly supports those claims. Do not use emojis or hashtags unless the profile requests them. "
+        "The result should be ready to paste into LinkedIn with only minor editing."
     ),
 }
 

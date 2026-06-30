@@ -301,6 +301,64 @@ class VerifyClaimsTests(unittest.TestCase):
             "Drop Python; only TypeScript is shown.",
         )
 
+    def test_progress_reports_real_stages(self) -> None:
+        # The streaming path threads a progress sink through the loop. It must fire
+        # analyzing once up front, a checking line per real tool call (carrying what
+        # the agent actually searched for), and compiling before the verdict — so
+        # the UI checklist tracks genuine work, not a timer.
+        agent = ScriptedAgent(
+            [
+                AgentStep(
+                    content=None,
+                    tool_calls=[
+                        ToolCall("call_1", "search_evidence", '{"query": "fastapi"}')
+                    ],
+                    finish_reason="tool_calls",
+                    usage=TokenUsage(100, 10, 0, 110),
+                ),
+                AgentStep(
+                    content=final_json(),
+                    tool_calls=[],
+                    finish_reason="stop",
+                    usage=TokenUsage(120, 30, 5, 150),
+                ),
+            ]
+        )
+        events: list[tuple[str, str | None]] = []
+        verify_claims(
+            make_evidence(),
+            make_outputs(),
+            UserContextInput(),
+            agent_fn=agent,
+            progress=lambda stage, detail: events.append((stage, detail)),
+        )
+
+        stages = [stage for stage, _ in events]
+        self.assertEqual(stages[0], "analyzing")
+        self.assertIn("checking", stages)
+        self.assertEqual(stages[-1], "compiling")
+        # The checking line reflects the agent's actual query.
+        checking_details = [detail for stage, detail in events if stage == "checking"]
+        self.assertTrue(any("fastapi" in (d or "") for d in checking_details))
+
+    def test_no_progress_sink_runs_silently(self) -> None:
+        # Omitting the sink must not change behavior: the loop still returns a result
+        # and never raises for the missing callback (the one-shot path relies on it).
+        agent = ScriptedAgent(
+            [
+                AgentStep(
+                    content=final_json(),
+                    tool_calls=[],
+                    finish_reason="stop",
+                    usage=TokenUsage(10, 10, 0, 20),
+                )
+            ]
+        )
+        verifications, _, _ = verify_claims(
+            make_evidence(), make_outputs(), UserContextInput(), agent_fn=agent
+        )
+        self.assertEqual(len(verifications), 1)
+
     def test_malformed_final_answer_raises_502(self) -> None:
         agent = ScriptedAgent(
             [

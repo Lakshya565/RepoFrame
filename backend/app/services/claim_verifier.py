@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from pathlib import PurePosixPath
 
 from pydantic import ValidationError
@@ -33,6 +34,60 @@ from app.services.token_estimator import estimate_input_tokens
 _MAX_SEARCH_MATCHES_PER_FILE = 8
 _MAX_SEARCH_LINES = 40
 _SNIPPET_MAX_CHARS = 200
+
+
+# Progress stages the verification run passes through, in display order. These are
+# REAL milestones, not a timed animation: the streaming endpoint emits one as each
+# is genuinely reached so the UI checklist tracks the agent's actual work.
+#   - gathering_evidence: the deterministic repo pipeline rebuilds the evidence
+#     bundle (emitted by the router, before the agent starts).
+#   - analyzing: the agent's first turn — it reads the writeup + evidence and
+#     extracts the discrete claims.
+#   - checking: the agent calls a read-only evidence tool (search / read a file);
+#     each call carries a human detail of what it is actually inspecting.
+#   - compiling: the agent is producing/parsing its final verdict.
+# The constants are shared so the router (which owns the evidence stage) and the
+# frontend agree on one closed vocabulary.
+VERIFY_STAGE_EVIDENCE = "gathering_evidence"
+VERIFY_STAGE_ANALYZING = "analyzing"
+VERIFY_STAGE_CHECKING = "checking"
+VERIFY_STAGE_COMPILING = "compiling"
+
+# A progress sink: called with (stage, detail) as each real milestone is reached.
+# detail is a short human description (used for the per-tool-call "checking" lines)
+# or None. Optional everywhere — the non-streaming path passes nothing, so the
+# whole agent loop runs identically with progress reporting simply turned off.
+ProgressFn = Callable[[str, str | None], None]
+
+
+# Fires a progress event when a sink is attached; a no-op otherwise, so threading
+# progress through the loop never changes behavior when no one is listening.
+def _emit(progress: ProgressFn | None, stage: str, detail: str | None) -> None:
+    if progress is not None:
+        progress(stage, detail)
+
+
+# Turns one tool call into a human "checking" line for the live UI. Reads the
+# tool's own arguments so the line reflects what the agent is ACTUALLY doing
+# (which term it is searching for, which file it is reading) rather than a generic
+# placeholder. Bad/old arguments degrade to a generic phrasing rather than raising.
+def _describe_tool_call(call: ToolCall) -> str:
+    try:
+        arguments = json.loads(call.arguments) if call.arguments else {}
+    except json.JSONDecodeError:
+        arguments = {}
+    if not isinstance(arguments, dict):
+        arguments = {}
+
+    if call.name == "search_evidence":
+        query = str(arguments.get("query", "")).strip()
+        return f"Searching the evidence for: {query}" if query else (
+            "Searching the repository evidence"
+        )
+    if call.name == "read_evidence_file":
+        path = str(arguments.get("path", "")).strip()
+        return f"Reading {path}" if path else "Reading an evidence file"
+    return "Inspecting the repository evidence"
 
 
 # The two tools the agent may call, in OpenAI function-tool schema form. Both are
@@ -341,13 +396,16 @@ def _extract_json_object(text: str) -> str | None:
 # token usage summed across every turn. An optional sections list scopes a per-tab
 # verification to specific output tabs (None = every tab with content). When there
 # are no claims to check, it short-circuits without any OpenAI call so it never
-# spends tokens for nothing.
+# spends tokens for nothing. An optional progress sink is called as each real stage
+# (analyzing -> per-tool-call checking -> compiling) is reached, so a streaming
+# caller can drive a live UI; passing nothing runs the loop identically but silent.
 def verify_claims(
     evidence: RepoEvidenceCollection,
     outputs: GeneratedOutputs,
     user_context: UserContextInput,
     sections: list[str] | None = None,
     agent_fn: AgentCompletionFn = openai_agent_completion,
+    progress: ProgressFn | None = None,
 ) -> tuple[list[ClaimVerification], int, TokenUsage]:
     if not _format_claims(outputs, sections):
         return [], 0, EMPTY_USAGE
@@ -362,6 +420,10 @@ def verify_claims(
     total_usage = EMPTY_USAGE
     tool_calls_made = 0
 
+    # The first turn is the agent reading the writeup + evidence and pulling out the
+    # claims to check; signal it before the call so the UI advances as work starts.
+    _emit(progress, VERIFY_STAGE_ANALYZING, None)
+
     for iteration in range(VERIFY_MAX_ITERATIONS):
         # Force a final, no-tools answer on the last allowed turn or once the tool
         # budget is exhausted, so the loop cannot end without a verdict.
@@ -369,17 +431,23 @@ def verify_claims(
             iteration == VERIFY_MAX_ITERATIONS - 1
             or tool_calls_made >= VERIFY_MAX_TOOL_CALLS
         )
+        # A forced-final turn IS the verdict turn, so surface "compiling" before it
+        # (that is where a reasoning model spends the verdict-generation time).
+        if force_final:
+            _emit(progress, VERIFY_STAGE_COMPILING, None)
         tool_choice = "none" if force_final else "auto"
 
         step = complete_with_tools(messages, _TOOL_SCHEMAS, tool_choice, agent_fn)
         total_usage = total_usage + step.usage
 
         # A turn with tool calls (and tools still allowed) means keep gathering: run
-        # each call and append its result, then loop for the model's next turn.
+        # each call and append its result, then loop for the model's next turn. Each
+        # call emits a "checking" line describing the real evidence lookup.
         if step.tool_calls and not force_final:
             messages.append(_assistant_tool_call_message(step))
             for call in step.tool_calls:
                 tool_calls_made += 1
+                _emit(progress, VERIFY_STAGE_CHECKING, _describe_tool_call(call))
                 messages.append(
                     {
                         "role": "tool",
@@ -389,7 +457,9 @@ def verify_claims(
                 )
             continue
 
-        # Otherwise this is the final answer: parse and return it.
+        # Otherwise this is the final answer: signal compiling (no-op if a forced
+        # turn already did) and parse the verdict.
+        _emit(progress, VERIFY_STAGE_COMPILING, None)
         return _parse_verifications(step.content), estimated_tokens, total_usage
 
     # Unreachable in practice (the last turn forces a final answer), but guards

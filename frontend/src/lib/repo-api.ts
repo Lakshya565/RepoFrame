@@ -337,6 +337,141 @@ export async function verifyClaims(
   );
 }
 
+// The real progress stages the verification agent passes through, in display
+// order. Mirrors the backend's closed stage vocabulary (claim_verifier) so the UI
+// checklist maps each event to a fixed step:
+//   - gathering_evidence: the deterministic pipeline rebuilds the repo evidence.
+//   - analyzing: the agent reads the writeup + evidence and extracts the claims.
+//   - checking: the agent searches/reads the evidence (detail says what, live).
+//   - compiling: the agent is producing its final verdict.
+export type VerifyStage =
+  | "gathering_evidence"
+  | "analyzing"
+  | "checking"
+  | "compiling";
+
+// One progress update from the streaming verify endpoint. detail is a short human
+// line for the "checking" stage (e.g. the term being searched) or null.
+export type VerifyProgressEvent = {
+  stage: VerifyStage;
+  detail: string | null;
+};
+
+// The SSE frames the streaming endpoint emits, as a discriminated union. The
+// "result" frame carries the exact VerifyClaimsResponse shape (plus the tag), so a
+// completed stream parses identically to the one-shot /verify response.
+type VerifyStreamEvent =
+  | ({ type: "result" } & VerifyClaimsResponse)
+  | { type: "progress"; stage: VerifyStage; detail: string | null }
+  | { type: "error"; detail: string; status: number };
+
+// Runs the bounded verification agent like verifyClaims, but over the STREAMING
+// endpoint: onProgress fires as each real stage is reached (so the UI checklist
+// tracks the agent's actual work), and the promise resolves with the final result
+// once the stream completes. Like verifyClaims it is opt-in — nothing runs until an
+// explicit press. A streamed { type: "error" } frame (or a pre-stream HTTP error)
+// rejects with the backend's message, matching the non-streaming error behavior.
+export async function verifyClaimsStream(
+  repoUrl: string,
+  userContext: UserContext,
+  outputs: GeneratedOutputs,
+  handlers: {
+    onProgress: (event: VerifyProgressEvent) => void;
+    signal?: AbortSignal;
+  },
+): Promise<VerifyClaimsResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/generate/verify/stream`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+    },
+    body: JSON.stringify({ repoUrl, userContext, outputs }),
+    signal: handlers.signal,
+  });
+
+  // A request rejected before streaming begins (e.g. body validation) returns a
+  // normal JSON error, so surface it exactly like the other API helpers do.
+  if (!response.ok || !response.body) {
+    const errorBody = (await response.json().catch(() => ({}))) as ApiErrorResponse;
+    throw new Error(
+      getApiErrorMessage(
+        errorBody,
+        "RepoFrame could not verify the generated claims.",
+      ),
+    );
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: VerifyClaimsResponse | null = null;
+
+  // SSE frames are separated by a blank line. Accumulate decoded text and process
+  // each complete frame as soon as it arrives so progress is live, not batched.
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary !== -1) {
+      const frame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+
+      const event = parseVerifyStreamFrame(frame);
+      if (event) {
+        if (event.type === "progress") {
+          handlers.onProgress({ stage: event.stage, detail: event.detail });
+        } else if (event.type === "error") {
+          throw new Error(
+            event.detail || "RepoFrame could not verify the generated claims.",
+          );
+        } else {
+          // The result frame is the VerifyClaimsResponse plus a tag; copy the
+          // response fields off it (dropping the tag).
+          result = {
+            verifications: event.verifications,
+            model: event.model,
+            estimatedInputTokens: event.estimatedInputTokens,
+            usage: event.usage,
+          };
+        }
+      }
+      boundary = buffer.indexOf("\n\n");
+    }
+  }
+
+  if (!result) {
+    throw new Error("The verification stream ended without a result.");
+  }
+  return result;
+}
+
+// Parses one SSE frame into its JSON event. An SSE frame may carry several lines;
+// the payload is the concatenation of every line after a "data:" prefix. Returns
+// null for keep-alive/comment frames or anything that is not valid JSON, so a stray
+// frame never breaks the stream.
+function parseVerifyStreamFrame(frame: string): VerifyStreamEvent | null {
+  const data = frame
+    .split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice("data:".length).trim())
+    .join("\n");
+
+  if (!data) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(data) as VerifyStreamEvent;
+  } catch {
+    return null;
+  }
+}
+
 // Fetches the persistent lifetime token totals so the UI can show project spend
 // without anyone opening the OpenAI dashboard.
 export async function fetchLifetimeUsage(): Promise<LifetimeUsage> {
