@@ -86,6 +86,11 @@ type GenerationContextValue = {
   // Preemptive instruction applied to everything produced by "Generate all".
   allGuidance: string;
   setAllGuidance: Dispatch<SetStateAction<string>>;
+  // Whether the "RepoFrame's guess" context fields have already been seeded from
+  // free repo analysis this session. Lives here (not in the page) so the seed runs
+  // once and is not repeated each time the user returns to the Generate tab.
+  guessesSeeded: boolean;
+  setGuessesSeeded: Dispatch<SetStateAction<boolean>>;
   // The in-flight generation task (the global lock), and the last error.
   busyTask: GenerationTask | null;
   setBusyTask: Dispatch<SetStateAction<GenerationTask | null>>;
@@ -119,6 +124,7 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
     Partial<Record<OutputSection, string>>
   >({});
   const [allGuidance, setAllGuidance] = useState("");
+  const [guessesSeeded, setGuessesSeeded] = useState(false);
   const [busyTask, setBusyTask] = useState<GenerationTask | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -145,6 +151,8 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
     setBaselines,
     allGuidance,
     setAllGuidance,
+    guessesSeeded,
+    setGuessesSeeded,
     busyTask,
     setBusyTask,
     error,

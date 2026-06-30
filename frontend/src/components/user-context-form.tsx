@@ -1,19 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { Loader2 } from "lucide-react";
 
 import {
   COLLABORATION_OPTIONS,
-  EMPTY_USER_CONTEXT,
-  USER_CONTEXT_TEXT_FIELDS,
-  getCollaborationLabel,
-  hasAnyUserContext,
+  INFERRED_GUESS_FIELDS,
+  YOUR_CONTEXT_FIELDS,
   type CollaborationMode,
   type UserContext,
+  type UserContextTextField,
   type UserContextTextKey,
 } from "@/lib/user-context";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -21,21 +19,23 @@ import { cn } from "@/lib/utils";
 type UserContextFormProps = {
   context: UserContext;
   onContextChange: (context: UserContext) => void;
+  // True while RepoFrame is still seeding its guesses from repo analysis, so the
+  // guess section can show an "analyzing" hint instead of looking empty.
+  seeding: boolean;
 };
 
-// Collects the project context that the repository cannot reveal on its own.
-// The answers are owned by the parent (lifted in Phase 11) so the writeup
-// generator can read them; this form renders the editable questionnaire and a
-// read-only saved summary, reporting edits up through onContextChange. Database
-// persistence is still left to a later phase.
+// The context REVIEW step. Rather than a blank questionnaire, it presents what
+// RepoFrame already inferred from the repo (purpose, target user, technical focus)
+// for the user to correct, then asks only for the things the repository genuinely
+// cannot prove (ownership, contribution, impact, and explicit "do not claim"
+// guardrails). The answers are owned by the parent so the generator and the
+// verification agent can read them; this form renders the fields and reports edits
+// up through onContextChange. The primary/skip actions live in the parent step.
 export function UserContextForm({
   context,
   onContextChange,
+  seeding,
 }: UserContextFormProps) {
-  // Tracks whether the user is editing the answers or viewing the saved summary.
-  // The form opens in edit mode so the first interaction is filling it in.
-  const [isEditing, setIsEditing] = useState(true);
-
   // Updates a single free-text field while leaving the rest of the answers
   // untouched. The parent owns the context, so updates flow up.
   function handleTextChange(key: UserContextTextKey, value: string) {
@@ -51,125 +51,132 @@ export function UserContextForm({
     });
   }
 
-  // Clears every answer back to the empty questionnaire.
-  function handleReset() {
-    onContextChange(EMPTY_USER_CONTEXT);
-  }
-
   return (
     <Card beam className="p-6">
       <h3 className="text-lg font-semibold">
-        Tell RepoFrame what the repo can&apos;t show
+        Review what RepoFrame can&apos;t infer
       </h3>
       <p className="mt-2 text-sm leading-6 text-muted-foreground">
-        These answers cover the parts of your project that code and config files
-        cannot reveal. RepoFrame uses them so generated writeups stay grounded in
-        what you tell it, instead of guessing intent, ownership, or impact.
+        RepoFrame has already analyzed the repo. Add the context that code cannot
+        prove, like your role, ownership, impact, and what claims should be handled
+        carefully.
       </p>
 
-      {isEditing ? (
-        <UserContextFields
-          context={context}
-          onTextChange={handleTextChange}
-          onCollaborationChange={handleCollaborationChange}
-          onSave={() => setIsEditing(false)}
-          onReset={handleReset}
-        />
-      ) : (
-        <UserContextSummary
-          context={context}
-          onEdit={() => setIsEditing(true)}
-        />
-      )}
+      {/* Part 1 — RepoFrame's guess: an inferred first pass to review/edit. */}
+      <section className="mt-6">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <h4 className="text-sm font-semibold">RepoFrame&apos;s guess</h4>
+          {seeding ? (
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Loader2 className="size-3.5 animate-spin text-brand" />
+              Analyzing the repo…
+            </span>
+          ) : null}
+        </div>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Review or edit these before generating. These guesses come from the
+          README, file tree, detected stack, and selected repo evidence.
+        </p>
+
+        <div className="mt-4 grid gap-5">
+          {INFERRED_GUESS_FIELDS.map((field) => (
+            <ContextField
+              field={field}
+              key={field.key}
+              onChange={handleTextChange}
+              value={context[field.key]}
+            />
+          ))}
+        </div>
+      </section>
+
+      {/* Part 2 — Your context: only what the repo cannot prove. */}
+      <section className="mt-8 border-t pt-6">
+        <h4 className="text-sm font-semibold">Your context</h4>
+        <p className="mt-1 text-sm text-muted-foreground">
+          These details help RepoFrame avoid guessing your role, ownership, impact,
+          or intent.
+        </p>
+
+        <div className="mt-4">
+          <OwnershipChoice
+            value={context.collaboration}
+            onChange={handleCollaborationChange}
+          />
+        </div>
+
+        <div className="mt-5 grid gap-5">
+          {YOUR_CONTEXT_FIELDS.map((field) => (
+            <ContextField
+              field={field}
+              key={field.key}
+              onChange={handleTextChange}
+              value={context[field.key]}
+            />
+          ))}
+        </div>
+      </section>
     </Card>
   );
 }
 
-type UserContextFieldsProps = {
-  context: UserContext;
-  onTextChange: (key: UserContextTextKey, value: string) => void;
-  onCollaborationChange: (value: CollaborationMode) => void;
-  onSave: () => void;
-  onReset: () => void;
+type ContextFieldProps = {
+  field: UserContextTextField;
+  value: string;
+  onChange: (key: UserContextTextKey, value: string) => void;
 };
 
-// Renders the editable questionnaire: the solo/team choice plus every free-text
-// question, driven by the shared field metadata so layout stays consistent.
-function UserContextFields({
-  context,
-  onTextChange,
-  onCollaborationChange,
-  onSave,
-  onReset,
-}: UserContextFieldsProps) {
+// Renders one free-text question (label + optional chip, the input or textarea,
+// and helper text) from the shared field metadata, so both sections stay
+// consistent without repeating the markup.
+function ContextField({ field, value, onChange }: ContextFieldProps) {
+  const id = `user-context-${field.key}`;
   return (
-    <div className="mt-6">
-      <CollaborationChoice
-        value={context.collaboration}
-        onChange={onCollaborationChange}
-      />
-
-      <div className="mt-6 grid gap-5">
-        {USER_CONTEXT_TEXT_FIELDS.map((field) => (
-          <div key={field.key}>
-            <label
-              className="flex items-center gap-2 text-sm font-medium"
-              htmlFor={`user-context-${field.key}`}
-            >
-              {field.label}
-              {field.optional ? (
-                <span className="text-xs font-normal text-muted-foreground">
-                  Optional
-                </span>
-              ) : null}
-            </label>
-            {field.multiline ? (
-              <Textarea
-                className="mt-2 min-h-24 resize-y"
-                id={`user-context-${field.key}`}
-                onChange={(event) => onTextChange(field.key, event.target.value)}
-                placeholder={field.placeholder}
-                value={context[field.key]}
-              />
-            ) : (
-              <Input
-                className="mt-2 h-11"
-                id={`user-context-${field.key}`}
-                onChange={(event) => onTextChange(field.key, event.target.value)}
-                placeholder={field.placeholder}
-                type="text"
-                value={context[field.key]}
-              />
-            )}
-            <p className="mt-1.5 text-sm text-muted-foreground">
-              {field.helper}
-            </p>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-        <Button onClick={onSave}>Save context</Button>
-        <Button variant="outline" onClick={onReset}>
-          Clear answers
-        </Button>
-      </div>
+    <div>
+      <label className="flex items-center gap-2 text-sm font-medium" htmlFor={id}>
+        {field.label}
+        {field.optional ? (
+          <span className="text-xs font-normal text-muted-foreground">
+            Optional
+          </span>
+        ) : null}
+      </label>
+      {field.multiline ? (
+        <Textarea
+          className="mt-2 min-h-24 resize-y"
+          id={id}
+          onChange={(event) => onChange(field.key, event.target.value)}
+          placeholder={field.placeholder}
+          value={value}
+        />
+      ) : (
+        <Input
+          className="mt-2 h-11"
+          id={id}
+          onChange={(event) => onChange(field.key, event.target.value)}
+          placeholder={field.placeholder}
+          type="text"
+          value={value}
+        />
+      )}
+      <p className="mt-1.5 text-sm text-muted-foreground">{field.helper}</p>
     </div>
   );
 }
 
-type CollaborationChoiceProps = {
+type OwnershipChoiceProps = {
   value: UserContext["collaboration"];
   onChange: (value: CollaborationMode) => void;
 };
 
-// Renders the solo/team question as a pair of toggle buttons. Using buttons
-// keeps the active state obvious and lets the user clear the choice by tapping
-// the selected option again.
-function CollaborationChoice({ value, onChange }: CollaborationChoiceProps) {
+// The solo/team question as a pair of compact toggle cards. Buttons keep the
+// active state obvious and let the user clear the choice by tapping the selected
+// option again. Ownership matters because it sets how strongly RepoFrame can
+// phrase contribution claims.
+function OwnershipChoice({ value, onChange }: OwnershipChoiceProps) {
   return (
     <fieldset>
-      <legend className="text-sm font-medium">Solo or team</legend>
+      <legend className="text-sm font-medium">Ownership</legend>
       <div className="mt-2 flex flex-col gap-3 sm:flex-row">
         {COLLABORATION_OPTIONS.map((option) => {
           const isSelected = value === option.value;
@@ -177,7 +184,7 @@ function CollaborationChoice({ value, onChange }: CollaborationChoiceProps) {
             <button
               aria-pressed={isSelected}
               className={cn(
-                "flex-1 cursor-pointer rounded-md border px-4 py-3 text-left transition-colors",
+                "flex-1 cursor-pointer rounded-md border px-4 py-2.5 text-left transition-colors",
                 isSelected
                   ? "border-brand bg-accent text-accent-foreground"
                   : "border-input hover:border-foreground/30 hover:bg-accent/50",
@@ -186,10 +193,8 @@ function CollaborationChoice({ value, onChange }: CollaborationChoiceProps) {
               onClick={() => onChange(option.value)}
               type="button"
             >
-              <span className="block text-sm font-semibold">
-                {option.label}
-              </span>
-              <span className="mt-0.5 block text-sm text-muted-foreground">
+              <span className="block text-sm font-semibold">{option.label}</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
                 {option.helper}
               </span>
             </button>
@@ -197,69 +202,5 @@ function CollaborationChoice({ value, onChange }: CollaborationChoiceProps) {
         })}
       </div>
     </fieldset>
-  );
-}
-
-type UserContextSummaryProps = {
-  context: UserContext;
-  onEdit: () => void;
-};
-
-// Shows the saved answers as a read-only summary. Blank answers render as
-// "Not provided" so the layout stays stable, and a single button returns the
-// user to the editable form.
-function UserContextSummary({ context, onEdit }: UserContextSummaryProps) {
-  return (
-    <div className="mt-6">
-      {hasAnyUserContext(context) ? (
-        <dl className="grid gap-3">
-          <SummaryRow
-            label="Solo or team"
-            value={getCollaborationLabel(context.collaboration)}
-          />
-          {USER_CONTEXT_TEXT_FIELDS.map((field) => (
-            <SummaryRow
-              key={field.key}
-              label={field.label}
-              value={context[field.key]}
-            />
-          ))}
-        </dl>
-      ) : (
-        <p className="rounded-md border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
-          No context saved yet. Add details so RepoFrame doesn&apos;t have to
-          guess.
-        </p>
-      )}
-
-      <Button variant="outline" className="mt-6" onClick={onEdit}>
-        Edit answers
-      </Button>
-    </div>
-  );
-}
-
-type SummaryRowProps = {
-  label: string;
-  value: string;
-};
-
-// Renders one saved answer. Empty values are shown as a muted "Not provided"
-// placeholder so the summary communicates completeness at a glance.
-function SummaryRow({ label, value }: SummaryRowProps) {
-  const trimmedValue = value.trim();
-  return (
-    <div className="rounded-md border bg-muted/40 p-4">
-      <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-      </dt>
-      <dd className="mt-1.5 whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
-        {trimmedValue !== "" ? (
-          trimmedValue
-        ) : (
-          <span className="text-muted-foreground">Not provided</span>
-        )}
-      </dd>
-    </div>
   );
 }

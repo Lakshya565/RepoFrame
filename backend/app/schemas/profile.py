@@ -9,6 +9,12 @@ from app.schemas.usage import UsageTotals
 # shape so the questionnaire can be posted straight through. Every field is
 # optional with an empty-string default because the form allows partial answers;
 # the generator treats blanks as "not provided" rather than fabricating values.
+#
+# Phase 14 context-review fields: technical_focus is a user-reviewable guess at the
+# areas to emphasize (seeded from the detected stack on the frontend), and
+# guardrails are explicit "do NOT claim" instructions — the latter feed both
+# generation (avoid producing the claim) and the verification agent (flag a claim
+# that violates them), which is core to RepoFrame's evidence-backed positioning.
 class UserContextInput(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -16,8 +22,10 @@ class UserContextInput(BaseModel):
     collaboration: Literal["solo", "team", ""] = ""
     contribution: str = ""
     target_user: str = Field(default="", alias="targetUser")
+    technical_focus: str = Field(default="", alias="technicalFocus")
     hardest_part: str = Field(default="", alias="hardestPart")
     impact: str = ""
+    guardrails: str = ""
 
 
 # Request body for profile generation: a GitHub repo URL plus the user context

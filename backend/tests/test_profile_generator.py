@@ -197,6 +197,20 @@ class ProfileGeneratorTests(unittest.TestCase):
         self.assertIn("solo", prompt)
         self.assertIn("I built it all", prompt)
 
+    def test_prompt_includes_technical_focus_and_guardrails(self) -> None:
+        # The Phase 14 review fields must reach the prompt: technical focus to
+        # emphasize, and guardrails the model must not violate.
+        context = UserContextInput(
+            technical_focus="file ranking, evidence mapping",
+            guardrails="Do not claim this has real users",
+        )
+        prompt = build_profile_prompt(
+            make_metadata(), make_technologies(), make_evidence(), context
+        )
+        self.assertIn("file ranking, evidence mapping", prompt)
+        self.assertIn("Do not claim this has real users", prompt)
+        self.assertIn("Guardrails", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

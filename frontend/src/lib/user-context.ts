@@ -1,7 +1,9 @@
-// Frontend-only data shapes for the Phase 9 user context questionnaire. These
-// answers capture project facts that cannot be inferred from the repository
-// alone (intent, ownership, audience, difficulty, impact). They live in
-// component state for now; persistence and LLM use arrive in later phases.
+// Frontend data shapes for the project context the repository cannot reveal on
+// its own (intent, ownership, audience, difficulty, impact, and explicit "do not
+// claim" guardrails). Phase 14 reframes this from a blank questionnaire into a
+// review step: RepoFrame seeds a first guess at a few fields from free repo
+// analysis (see use-inferred-context), and the user corrects or adds the rest.
+// These answers ground every generated output and feed the verification agent.
 
 // Whether the project was built alone or as part of a team. Kept as a small
 // closed set so the UI can render it as a choice instead of free text.
@@ -9,13 +11,19 @@ export type CollaborationMode = "solo" | "team";
 
 // The full set of user-provided context answers. Every field is a string so the
 // form can stay fully controlled; an empty string means "not answered yet".
+//   - purpose / targetUser / technicalFocus are the "RepoFrame's guess" fields,
+//     prefilled from repo analysis and editable.
+//   - collaboration / contribution / hardestPart / impact / guardrails are the
+//     user-only context the repo cannot prove.
 export type UserContext = {
   purpose: string;
+  targetUser: string;
+  technicalFocus: string;
   collaboration: CollaborationMode | "";
   contribution: string;
-  targetUser: string;
   hardestPart: string;
   impact: string;
+  guardrails: string;
 };
 
 // Keys of the free-text fields, used to drive both rendering and state updates
@@ -44,52 +52,92 @@ export type CollaborationOption = {
 // A blank questionnaire, used as the initial form state and when resetting.
 export const EMPTY_USER_CONTEXT: UserContext = {
   purpose: "",
+  targetUser: "",
+  technicalFocus: "",
   collaboration: "",
   contribution: "",
-  targetUser: "",
   hardestPart: "",
   impact: "",
+  guardrails: "",
 };
 
-// The free-text questions in the order they should appear. Wording stays in
-// product language and frames each answer as something the repo cannot reveal.
-export const USER_CONTEXT_TEXT_FIELDS: UserContextTextField[] = [
+// "RepoFrame's guess" fields: an inferred first pass the user reviews and edits.
+// purpose and technicalFocus are seeded from free repo analysis (repo description
+// + detected stack); targetUser is left for the user since the repo rarely shows
+// it. Wording frames each as RepoFrame's understanding, not a blank to fill.
+export const INFERRED_GUESS_FIELDS: UserContextTextField[] = [
   {
     key: "purpose",
     label: "Project purpose",
-    helper: "What does this project do, and why did you build it?",
-    placeholder: "A tool that turns GitHub repos into evidence-backed writeups…",
-    multiline: true,
-  },
-  {
-    key: "contribution",
-    label: "Your contribution",
-    helper: "What did you personally design, build, or own?",
-    placeholder: "I built the FastAPI backend and the file-ranking pipeline…",
+    helper: "What RepoFrame thinks this project does.",
+    placeholder:
+      "A tool that turns GitHub repos into evidence-backed project writeups…",
     multiline: true,
   },
   {
     key: "targetUser",
-    label: "Target user or client",
-    helper: "Who is this for? A real client, a user group, or yourself.",
-    placeholder: "Developers writing up side projects for resumes",
+    label: "Target user",
+    helper: "Who RepoFrame thinks this project is for.",
+    placeholder: "Students and developers writing up side projects…",
     multiline: false,
   },
   {
+    key: "technicalFocus",
+    label: "Technical focus",
+    helper: "The main technical areas RepoFrame should emphasize.",
+    placeholder:
+      "GitHub API integration, file ranking, evidence-backed generation…",
+    multiline: true,
+  },
+];
+
+// "Your context" fields: the things the repository genuinely cannot prove, so
+// RepoFrame should not guess them. Contribution and the hardest problem carry the
+// most weight; impact and guardrails are optional. Guardrails are sent through to
+// generation and claim verification as explicit "do not claim" constraints.
+export const YOUR_CONTEXT_FIELDS: UserContextTextField[] = [
+  {
+    key: "contribution",
+    label: "What did you personally build?",
+    helper:
+      "Focus on your actual contribution, especially if this was a team project.",
+    placeholder:
+      "I built the FastAPI backend, GitHub repo ingestion flow, and file-ranking pipeline…",
+    multiline: true,
+  },
+  {
     key: "hardestPart",
-    label: "Hardest technical part",
-    helper: "The problem that took the most thought or effort to solve.",
+    label: "What was the hardest technical problem?",
+    helper:
+      "This helps RepoFrame generate stronger technical bullets and interview points.",
     placeholder: "Ranking the most relevant files without fetching the whole repo…",
     multiline: true,
   },
   {
     key: "impact",
-    label: "Impact or results",
-    helper: "Any measurable outcome, if you have one.",
-    placeholder: "Cut writeup time from an hour to a few minutes",
+    label: "Any result or impact?",
+    helper:
+      "Use real numbers if you have them. If not, describe the outcome without inventing metrics.",
+    placeholder: "Cut writeup time from an hour to a few minutes…",
     multiline: true,
     optional: true,
   },
+  {
+    key: "guardrails",
+    label: "Anything RepoFrame should avoid claiming?",
+    helper: "Use this to prevent inflated or inaccurate writeups.",
+    placeholder: "Do not say this has real users yet. Do not claim I built the frontend.",
+    multiline: true,
+    optional: true,
+  },
+];
+
+// The combined free-text questions (guess fields first, then user-only context).
+// Retained for any consumer that needs the full field set (e.g. equality or a
+// flat walk); the form renders the two groups above as separate sections.
+export const USER_CONTEXT_TEXT_FIELDS: UserContextTextField[] = [
+  ...INFERRED_GUESS_FIELDS,
+  ...YOUR_CONTEXT_FIELDS,
 ];
 
 // The collaboration choices. Kept separate from the text fields because it is
@@ -99,8 +147,8 @@ export const COLLABORATION_OPTIONS: CollaborationOption[] = [
   { value: "team", label: "Team", helper: "I built this with others" },
 ];
 
-// Returns true when the user has provided at least one answer. The saved summary
-// uses this to show an empty-state hint instead of a list of blanks.
+// Returns true when the user has provided at least one answer. Used to seed a
+// sensible landing step for returning users whose context survived tab navigation.
 export function hasAnyUserContext(context: UserContext): boolean {
   return Object.values(context).some((value) => value.trim() !== "");
 }
@@ -111,16 +159,18 @@ export function hasAnyUserContext(context: UserContext): boolean {
 export function userContextEquals(a: UserContext, b: UserContext): boolean {
   return (
     a.purpose === b.purpose &&
+    a.targetUser === b.targetUser &&
+    a.technicalFocus === b.technicalFocus &&
     a.collaboration === b.collaboration &&
     a.contribution === b.contribution &&
-    a.targetUser === b.targetUser &&
     a.hardestPart === b.hardestPart &&
-    a.impact === b.impact
+    a.impact === b.impact &&
+    a.guardrails === b.guardrails
   );
 }
 
 // Maps a collaboration value to its display label, falling back to a clear
-// "Not provided" string so the summary never renders a raw enum value.
+// "Not provided" string so callers never render a raw enum value.
 export function getCollaborationLabel(value: CollaborationMode | ""): string {
   const option = COLLABORATION_OPTIONS.find((item) => item.value === value);
   return option ? option.label : "Not provided";

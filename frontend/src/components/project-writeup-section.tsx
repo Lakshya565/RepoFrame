@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,7 @@ import {
 } from "@/lib/repo-api";
 import { hasAnyUserContext, userContextEquals } from "@/lib/user-context";
 import { useGeneration } from "@/lib/generation-context";
+import { useInferredContextGuesses } from "@/lib/use-inferred-context";
 
 type ProjectWriteupSectionProps = {
   repoUrl: string;
@@ -94,6 +95,8 @@ export function ProjectWriteupSection({
     setBaselines,
     allGuidance,
     setAllGuidance,
+    guessesSeeded,
+    setGuessesSeeded,
     busyTask,
     setBusyTask,
     error,
@@ -101,6 +104,21 @@ export function ProjectWriteupSection({
     addUsage,
     refreshLifetime,
   } = useGeneration();
+
+  // Seed RepoFrame's "guess" context fields from free repo analysis (detected
+  // stack -> technical focus, repo description -> purpose). Runs once per session
+  // and only fills blank fields; `seeding` drives the form's analyzing hint. A
+  // stable onSeeded keeps the effect from cancelling its own in-flight fetch.
+  const markGuessesSeeded = useCallback(
+    () => setGuessesSeeded(true),
+    [setGuessesSeeded],
+  );
+  const { seeding: seedingGuesses } = useInferredContextGuesses({
+    repoUrl,
+    alreadySeeded: guessesSeeded,
+    onSeeded: markGuessesSeeded,
+    setContext,
+  });
 
   // Whether anything has been generated yet. Gates the verification agent (there
   // must be a draft to check) and seeds a sensible landing step for returning
@@ -382,6 +400,7 @@ export function ProjectWriteupSection({
             context={context}
             onContextChange={setContext}
             onContinue={handleContinueFromContext}
+            seeding={seedingGuesses}
           />
         ) : (
           <div className="space-y-6">
@@ -427,24 +446,38 @@ type ContextStepProps = {
   context: Parameters<typeof UserContextForm>[0]["context"];
   onContextChange: Parameters<typeof UserContextForm>[0]["onContextChange"];
   onContinue: () => void;
+  seeding: boolean;
 };
 
-// Step 1 — the questionnaire plus a Continue affordance. Context is optional, so
-// Continue advances even with nothing filled in; the helper text says so.
+// Step 1 — the context review plus its two actions. Both advance to the Generate
+// step (context is optional): the primary continues with whatever was added, and
+// the secondary skips adding context. The note reassures the skipper that
+// RepoFrame stays conservative without it, rather than warning them.
 function ContextStep({
   context,
   onContextChange,
   onContinue,
+  seeding,
 }: ContextStepProps) {
   return (
     <div className="space-y-4">
-      <UserContextForm context={context} onContextChange={onContextChange} />
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <Button variant="brand" onClick={onContinue}>
-          Continue to generate
-        </Button>
-        <p className="text-sm text-muted-foreground">
-          Context is optional — you can continue without filling everything in.
+      <UserContextForm
+        context={context}
+        onContextChange={onContextChange}
+        seeding={seeding}
+      />
+      <div className="space-y-3">
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <Button variant="brand" onClick={onContinue}>
+            Continue with added context
+          </Button>
+          <Button variant="outline" onClick={onContinue}>
+            Generate with repo evidence only
+          </Button>
+        </div>
+        <p className="text-sm leading-6 text-muted-foreground">
+          Adding context is optional. Without it, RepoFrame will avoid claims about
+          ownership, impact, or motivation unless the repo clearly supports them.
         </p>
       </div>
     </div>

@@ -9,7 +9,9 @@ from app.services.file_content_service import RepoEvidenceCollection
 
 # Formats the questionnaire answers for a prompt, marking blanks explicitly with
 # "(not provided)" so a model never treats an empty answer as a fact it can lean
-# on, and knows which non-repo details it genuinely lacks.
+# on, and knows which non-repo details it genuinely lacks. Guardrails are rendered
+# last and labeled as a hard "must not claim" instruction so both the generator and
+# the verification agent treat them as constraints rather than just more context.
 def format_user_context(user_context: UserContextInput) -> str:
     def value(text: str) -> str:
         stripped = text.strip()
@@ -22,8 +24,10 @@ def format_user_context(user_context: UserContextInput) -> str:
         f"- Built solo or as a team: {collaboration}\n"
         f"- User's personal contribution: {value(user_context.contribution)}\n"
         f"- Target user or client: {value(user_context.target_user)}\n"
+        f"- Technical focus to emphasize: {value(user_context.technical_focus)}\n"
         f"- Hardest technical part: {value(user_context.hardest_part)}\n"
-        f"- Impact or results: {value(user_context.impact)}"
+        f"- Impact or results: {value(user_context.impact)}\n"
+        f"- Guardrails (claims to AVOID making): {value(user_context.guardrails)}"
     )
 
 
