@@ -11,6 +11,7 @@ import {
   type UserContextTextField,
   type UserContextTextKey,
 } from "@/lib/user-context";
+import { AnimatedDivider } from "@/components/animated-divider";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -54,7 +55,7 @@ export function UserContextForm({
   return (
     <Card beam className="p-6">
       <h3 className="text-lg font-semibold">
-        Review what RepoFrame can&apos;t infer
+        Review What RepoFrame Cannot Infer
       </h3>
       <p className="mt-2 text-sm leading-6 text-muted-foreground">
         RepoFrame has already analyzed the repo. Add the context that code cannot
@@ -65,7 +66,7 @@ export function UserContextForm({
       {/* Part 1 — RepoFrame's guess: an inferred first pass to review/edit. */}
       <section className="mt-6">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <h4 className="text-sm font-semibold">RepoFrame&apos;s guess</h4>
+          <h4 className="text-base font-semibold">RepoFrame&apos;s Guess</h4>
           {seeding ? (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Loader2 className="size-3.5 animate-spin text-brand" />
@@ -90,9 +91,12 @@ export function UserContextForm({
         </div>
       </section>
 
-      {/* Part 2 — Your context: only what the repo cannot prove. */}
-      <section className="mt-8 border-t pt-6">
-        <h4 className="text-sm font-semibold">Your context</h4>
+      {/* Part 2 — Your context: only what the repo cannot prove. The animated
+          hairline replaces a border-t that read too faint between the two
+          sections. */}
+      <AnimatedDivider className="mt-8" />
+      <section className="mt-6">
+        <h4 className="text-base font-semibold">Your Context</h4>
         <p className="mt-1 text-sm text-muted-foreground">
           These details help RepoFrame avoid guessing your role, ownership, impact,
           or intent.
@@ -159,7 +163,9 @@ function ContextField({ field, value, onChange }: ContextFieldProps) {
           value={value}
         />
       )}
-      <p className="mt-1.5 text-sm text-muted-foreground">{field.helper}</p>
+      {/* Helper caption sits a shade darker than the input's muted placeholder so
+          the two never blend into one gray block. */}
+      <p className="mt-1.5 text-sm text-foreground/70">{field.helper}</p>
     </div>
   );
 }

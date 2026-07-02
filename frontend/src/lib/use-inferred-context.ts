@@ -39,8 +39,13 @@ export function useInferredContextGuesses({
   // Only the very first, un-seeded mount shows the analyzing hint; a return visit
   // (already seeded) starts settled.
   const [seeding, setSeeding] = useState(!alreadySeeded);
-  // Guards against the effect's body running its fetch twice (e.g. StrictMode
-  // double-invoke) within one mount.
+  // Dedupes the fetch so it runs exactly once even under React StrictMode's
+  // dev-only double mount. It must NOT be paired with a per-mount "cancelled"
+  // flag flipped in cleanup: StrictMode tears down the first mount (running its
+  // cleanup) before the second mount, but this ref then makes the second mount
+  // skip re-fetching — so a cleanup-based cancel would abort the one and only
+  // seed, leaving the guess fields blank and the "analyzing" hint spinning
+  // forever. Guarding by this ref alone lets the single run always complete.
   const startedRef = useRef(false);
 
   useEffect(() => {
@@ -48,7 +53,6 @@ export function useInferredContextGuesses({
       return;
     }
     startedRef.current = true;
-    let cancelled = false;
 
     async function seed() {
       try {
@@ -58,9 +62,6 @@ export function useInferredContextGuesses({
           fetchRepoMetadata(repoUrl).catch(() => null),
           fetchTechStack(repoUrl).catch(() => null),
         ]);
-        if (cancelled) {
-          return;
-        }
 
         const purpose = metadata?.description?.trim() ?? "";
         const focus = techStack
@@ -82,18 +83,17 @@ export function useInferredContextGuesses({
               : current.technicalFocus,
         }));
       } finally {
-        if (!cancelled) {
-          setSeeding(false);
-          onSeeded();
-        }
+        // Always settle the hint and mark the session seeded, even if both
+        // fetches failed — a blank guess is the user's to fill, not a stuck
+        // spinner. A repo change remounts the whole provider (keyed by base
+        // path), so there is no in-place repoUrl swap that could land a stale
+        // write here.
+        setSeeding(false);
+        onSeeded();
       }
     }
 
     void seed();
-
-    return () => {
-      cancelled = true;
-    };
   }, [repoUrl, alreadySeeded, onSeeded, setContext]);
 
   return { seeding };

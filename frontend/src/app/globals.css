@@ -180,6 +180,24 @@
   }
 }
 
+/*
+  Context-form section divider sheen. The hairline between "RepoFrame's guess"
+  and "Your context" (animated-divider.tsx) carries a brand-tinted resting
+  gradient; a brighter half-width highlight sweeps across it on a slow loop —
+  the shimmer technique Magic UI uses on its buttons, applied to a 1px rule. The
+  -100%->200% range is coupled to the highlight's half-track width (see the
+  component). Duration/easing live as a constant there; the sweep hides under
+  prefers-reduced-motion via the component's motion-reduce class.
+*/
+@keyframes divider-sheen {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(200%);
+  }
+}
+
 /* Base element defaults: token-driven border color and page background/text. */
 @layer base {
   * {

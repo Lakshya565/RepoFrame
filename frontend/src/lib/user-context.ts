@@ -11,10 +11,11 @@ export type CollaborationMode = "solo" | "team";
 
 // The full set of user-provided context answers. Every field is a string so the
 // form can stay fully controlled; an empty string means "not answered yet".
-//   - purpose / targetUser / technicalFocus are the "RepoFrame's guess" fields,
-//     prefilled from repo analysis and editable.
-//   - collaboration / contribution / hardestPart / impact / guardrails are the
-//     user-only context the repo cannot prove.
+//   - purpose / technicalFocus are the "RepoFrame's guess" fields, prefilled
+//     from free repo analysis (GitHub description + detected stack) and editable.
+//   - targetUser / collaboration / contribution / hardestPart / impact /
+//     guardrails are the user-only context the repo cannot prove (audience has no
+//     reliable free signal, so it lives here rather than as a guess).
 export type UserContext = {
   purpose: string;
   targetUser: string;
@@ -62,9 +63,11 @@ export const EMPTY_USER_CONTEXT: UserContext = {
 };
 
 // "RepoFrame's guess" fields: an inferred first pass the user reviews and edits.
-// purpose and technicalFocus are seeded from free repo analysis (repo description
-// + detected stack); targetUser is left for the user since the repo rarely shows
-// it. Wording frames each as RepoFrame's understanding, not a blank to fill.
+// Both are seeded from free repo analysis — purpose from the GitHub "About"
+// description, technicalFocus from the detected stack. When a repo lacks that
+// signal the field stays blank (evidence, not invention); the placeholder then
+// reads as an "add this yourself" prompt. targetUser is intentionally NOT here —
+// audience has no reliable free signal, so it moved to "Your context" below.
 export const INFERRED_GUESS_FIELDS: UserContextTextField[] = [
   {
     key: "purpose",
@@ -73,13 +76,6 @@ export const INFERRED_GUESS_FIELDS: UserContextTextField[] = [
     placeholder:
       "A tool that turns GitHub repos into evidence-backed project writeups…",
     multiline: true,
-  },
-  {
-    key: "targetUser",
-    label: "Target user",
-    helper: "Who RepoFrame thinks this project is for.",
-    placeholder: "Students and developers writing up side projects…",
-    multiline: false,
   },
   {
     key: "technicalFocus",
@@ -92,10 +88,18 @@ export const INFERRED_GUESS_FIELDS: UserContextTextField[] = [
 ];
 
 // "Your context" fields: the things the repository genuinely cannot prove, so
-// RepoFrame should not guess them. Contribution and the hardest problem carry the
-// most weight; impact and guardrails are optional. Guardrails are sent through to
-// generation and claim verification as explicit "do not claim" constraints.
+// RepoFrame should not guess them. Target user leads (the repo rarely states its
+// audience); contribution and the hardest problem carry the most weight; impact
+// and guardrails are optional. Guardrails are sent through to generation and
+// claim verification as explicit "do not claim" constraints.
 export const YOUR_CONTEXT_FIELDS: UserContextTextField[] = [
+  {
+    key: "targetUser",
+    label: "Target users",
+    helper: "Who this project is really for, so RepoFrame can write for that audience.",
+    placeholder: "Students and developers writing up side projects…",
+    multiline: false,
+  },
   {
     key: "contribution",
     label: "What did you personally build?",
@@ -126,7 +130,7 @@ export const YOUR_CONTEXT_FIELDS: UserContextTextField[] = [
     key: "guardrails",
     label: "Anything RepoFrame should avoid claiming?",
     helper: "Use this to prevent inflated or inaccurate writeups.",
-    placeholder: "Do not say this has real users yet. Do not claim I built the frontend.",
+    placeholder: "Do not say this has real users yet. Do not claim I built the entire frontend.",
     multiline: true,
     optional: true,
   },

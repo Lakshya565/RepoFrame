@@ -14,6 +14,10 @@ export type RepoMetadataResponse = ParsedRepoResponse & {
   forks: number;
   language: string | null;
   htmlUrl: string;
+  // Maintainer-applied subject tags (may be empty) and the detected license's
+  // short id (e.g. "MIT"), or null when unlicensed/unrecognized.
+  topics: string[];
+  license: string | null;
 };
 
 export type RepoFile = {
@@ -102,6 +106,45 @@ export async function fetchRepoMetadata(
     "/api/repo/metadata",
     repoUrl,
     "RepoFrame could not fetch repository metadata.",
+  );
+}
+
+// The time window a commit-activity timeline covers: last month (daily points),
+// last year (weekly), or full history (adaptive grain).
+export type CommitActivityRange = "month" | "year" | "all";
+
+// One bar of the commit-activity timeline: the UTC ISO date the bucket starts on
+// and the commits summed into it.
+export type CommitTimelineBucket = {
+  periodStart: string;
+  commitCount: number;
+};
+
+// The commit-activity timeline: adaptive-interval bars plus the grain's label, the
+// total commits over the window, the window's start/end dates (null when the
+// repository has no commit activity), the charted range, and whether the "all time"
+// data may be truncated (GitHub caps contributor stats at the top 100 contributors).
+export type CommitActivityResponse = ParsedRepoResponse & {
+  range: CommitActivityRange;
+  intervalLabel: string;
+  totalCommits: number;
+  rangeStart: string | null;
+  rangeEnd: string | null;
+  contributorsTruncated: boolean;
+  buckets: CommitTimelineBucket[];
+};
+
+// Fetches commit activity as a bucketed timeline for the Analysis graph, over the
+// given range. The backend does the GitHub call(s) and all the bucketing; a "still
+// computing" stats-cache state surfaces as a retryable error the card handles.
+export async function fetchCommitActivity(
+  repoUrl: string,
+  range: CommitActivityRange,
+): Promise<CommitActivityResponse> {
+  return postJson(
+    "/api/repo/commit-activity",
+    { repoUrl, range },
+    "RepoFrame could not fetch commit activity.",
   );
 }
 

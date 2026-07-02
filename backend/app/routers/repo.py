@@ -1,6 +1,9 @@
 from fastapi import APIRouter, HTTPException
 
 from app.schemas.repo import (
+    CommitActivityRequest,
+    CommitActivityResponse,
+    CommitTimelineBucket,
     DetectedTechnology,
     RankedRepoFile,
     RepoFileContentResponse,
@@ -15,12 +18,21 @@ from app.schemas.repo import (
     TechStackEvidence,
     TechStackResponse,
 )
+from app.services.commit_activity import (
+    MIN_ALL_RANGE_WEEKS,
+    build_commit_timeline,
+    build_daily_timeline,
+)
 from app.services.file_content_service import collect_file_evidence
 from app.services.file_ranker import filter_repo_files, rank_important_files
 from app.services.github_service import (
+    GitHubCommitActivityError,
     GitHubFileContentError,
     GitHubMetadataError,
     GitHubTreeError,
+    fetch_commit_activity,
+    fetch_contributor_weeks,
+    fetch_repo_languages,
     fetch_repo_metadata,
     fetch_repo_tree,
 )
@@ -72,6 +84,59 @@ def get_repo_metadata(request: RepoParseRequest) -> RepoMetadataResponse:
         forks=metadata.forks,
         language=metadata.language,
         html_url=metadata.html_url,
+        topics=metadata.topics,
+        license=metadata.license,
+    )
+
+
+# Returns commit activity as an adaptive-interval timeline for the Analysis-page
+# graph, over one of three ranges. "month" and "year" come from one
+# /stats/commit_activity call (daily vs weekly grain); "all" sums /stats/contributors
+# for full history (and may be truncated to the top 100 contributors). The bucketing
+# is a deterministic service so the route stays thin; the stats endpoints' "still
+# computing" (202) state surfaces as a 503 the frontend can retry.
+@router.post("/commit-activity", response_model=CommitActivityResponse)
+def get_repo_commit_activity(
+    request: CommitActivityRequest,
+) -> CommitActivityResponse:
+    contributors_truncated = False
+    try:
+        parsed_repo = parse_github_repo_url(request.repo_url)
+        if request.range == "all":
+            weeks, contributors_truncated = fetch_contributor_weeks(
+                parsed_repo.owner, parsed_repo.repo
+            )
+            # Floor the window at a full year so young repos don't render a stub.
+            timeline = build_commit_timeline(weeks, min_weeks=MIN_ALL_RANGE_WEEKS)
+        else:
+            weeks = fetch_commit_activity(parsed_repo.owner, parsed_repo.repo)
+            timeline = (
+                build_daily_timeline(weeks)
+                if request.range == "month"
+                else build_commit_timeline(weeks)
+            )
+    except RepoUrlParseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except GitHubCommitActivityError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    return CommitActivityResponse(
+        owner=parsed_repo.owner,
+        repo=parsed_repo.repo,
+        normalized_url=parsed_repo.normalized_url,
+        range=request.range,
+        interval_label=timeline.interval_label,
+        total_commits=timeline.total_commits,
+        range_start=timeline.range_start,
+        range_end=timeline.range_end,
+        contributors_truncated=contributors_truncated,
+        buckets=[
+            CommitTimelineBucket(
+                period_start=bucket.period_start,
+                commit_count=bucket.commit_count,
+            )
+            for bucket in timeline.buckets
+        ],
     )
 
 
@@ -179,6 +244,9 @@ def get_repo_tech_stack(request: RepoParseRequest) -> TechStackResponse:
             metadata.default_branch,
             ranked_files,
         )
+        # The full per-language byte breakdown (best-effort: {} on failure) so the
+        # detected stack reflects every meaningful language, not just the top one.
+        languages = fetch_repo_languages(parsed_repo.owner, parsed_repo.repo)
     except RepoUrlParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except GitHubMetadataError as exc:
@@ -188,7 +256,7 @@ def get_repo_tech_stack(request: RepoParseRequest) -> TechStackResponse:
     except GitHubFileContentError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    technologies = detect_tech_stack(metadata, ranked_files, file_contents)
+    technologies = detect_tech_stack(metadata, ranked_files, file_contents, languages)
 
     return TechStackResponse(
         owner=parsed_repo.owner,

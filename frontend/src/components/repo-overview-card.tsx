@@ -9,6 +9,7 @@ import {
 } from "@/lib/repo-api";
 import { useRepoResource, type RepoResource } from "@/lib/use-repo-resource";
 import { useTechStack } from "@/lib/tech-stack-context";
+import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/states";
@@ -96,6 +97,7 @@ function RepoSummarySection({
     ...(metadata.language
       ? [{ label: "Primary language", value: metadata.language }]
       : []),
+    ...(metadata.license ? [{ label: "License", value: metadata.license }] : []),
   ];
 
   return (
@@ -119,6 +121,17 @@ function RepoSummarySection({
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
           {metadata.description}
         </p>
+      ) : null}
+
+      {/* Maintainer-applied subject tags, when the repo has any. */}
+      {metadata.topics.length > 0 ? (
+        <ul className="mt-3 flex flex-wrap gap-1.5">
+          {metadata.topics.map((topic) => (
+            <li key={topic}>
+              <Badge variant="muted">{topic}</Badge>
+            </li>
+          ))}
+        </ul>
       ) : null}
 
       <dl className="mt-5 grid grid-cols-2 gap-3">

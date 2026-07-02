@@ -39,6 +39,7 @@ from app.services.github_service import (
     GitHubFileContentError,
     GitHubMetadataError,
     GitHubTreeError,
+    fetch_repo_languages,
     fetch_repo_metadata,
     fetch_repo_tree,
 )
@@ -89,7 +90,12 @@ def generate_profile(request: GenerateProfileRequest) -> GenerateProfileResponse
             metadata.default_branch,
             ranked_files,
         )
-        technologies = detect_tech_stack(metadata, ranked_files, file_contents)
+        # The full per-language byte breakdown (best-effort: {} on failure) so the
+        # profile is grounded in every meaningful language, not just the top one.
+        languages = fetch_repo_languages(parsed_repo.owner, parsed_repo.repo)
+        technologies = detect_tech_stack(
+            metadata, ranked_files, file_contents, languages
+        )
 
         # Bounded source/README/config evidence (Phase 7) feeds the prompt body.
         evidence = collect_file_evidence(

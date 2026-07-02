@@ -1,7 +1,8 @@
 import os
 import base64
+import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import cast
@@ -14,6 +15,14 @@ from requests import RequestException
 GITHUB_API_BASE_URL = "https://api.github.com"
 GITHUB_TOKEN_ENV = "GITHUB_TOKEN"
 REQUEST_TIMEOUT_SECONDS = 10
+
+# Bounded warm-up retries for GitHub's commit-statistics endpoint, which returns
+# 202 (with no body) the first time it must compute the stats for a repository.
+# A few short retries usually catch the freshly-cached data on the same request;
+# if not, the caller surfaces a "try again" state rather than blocking indefinitely.
+COMMIT_STATS_MAX_ATTEMPTS = 3
+COMMIT_STATS_RETRY_DELAY_SECONDS = 1.2
+
 BACKEND_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 load_dotenv(BACKEND_ENV_FILE)
@@ -27,7 +36,10 @@ class GitHubMetadataError(RuntimeError):
         self.status_code = status_code
 
 
-# Internal repository metadata shape after GitHub's raw JSON is validated.
+# Internal repository metadata shape after GitHub's raw JSON is validated. topics
+# and license come from the same /repos response (no extra request): topics are the
+# maintainer-applied subject tags, and license is the detected license's short
+# identifier (SPDX id, e.g. "MIT"), or None when unlicensed/unrecognized.
 @dataclass(frozen=True)
 class GitHubRepoMetadata:
     name: str
@@ -37,6 +49,8 @@ class GitHubRepoMetadata:
     forks: int
     language: str | None
     html_url: str
+    topics: list[str] = field(default_factory=list)
+    license: str | None = None
 
 
 # Carries a user-facing GitHub file-tree error and matching HTTP status.
@@ -55,6 +69,15 @@ class GitHubRateLimitError(RuntimeError):
 
 # Carries a user-facing GitHub file-content error and matching HTTP status.
 class GitHubFileContentError(RuntimeError):
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+# Carries a user-facing GitHub commit-activity error and matching HTTP status.
+# The stats endpoints have a distinct "still computing" (202) state, surfaced here
+# as a retryable error so the route/UI can ask the user to try again shortly.
+class GitHubCommitActivityError(RuntimeError):
     def __init__(self, message: str, status_code: int) -> None:
         super().__init__(message)
         self.status_code = status_code
@@ -87,6 +110,17 @@ class GitHubRateLimit:
     reset: int
     reset_at: str
     is_authenticated: bool
+
+
+# One week of commit activity: the Unix timestamp of the week's start (Sunday, UTC)
+# and the total commits that week. `days` holds the seven daily counts (Sun–Sat)
+# when the source provides them (the /stats/commit_activity endpoint does; the
+# contributor-summed full-history source does not, leaving it empty).
+@dataclass(frozen=True)
+class WeeklyCommitCount:
+    week_start: int
+    total: int
+    days: tuple[int, ...] = ()
 
 
 # Internal text-file content shape after GitHub's content payload is decoded.
@@ -149,6 +183,180 @@ def fetch_repo_metadata(
         )
 
     return _parse_metadata_response(response)
+
+
+# Fetches GitHub's full per-language byte breakdown for the repository (the data
+# behind the colored language bar on the repo page), via the dedicated /languages
+# endpoint. This matters because the single `language` field on the metadata
+# response is ONLY the top language by bytes — for a polyglot repo like openjdk/jdk
+# it reports just "Java" and hides C++, C, Assembly, etc. The /languages endpoint
+# returns every language Linguist detected, so detection can represent the real mix.
+#
+# Best-effort enrichment: on any failure it returns an empty mapping so stack
+# detection simply falls back to the primary language and file signals rather than
+# failing the whole analysis over a secondary call. Returns {language: bytes}.
+def fetch_repo_languages(
+    owner: str,
+    repo: str,
+    session: requests.Session | None = None,
+) -> dict[str, int]:
+    client = session or requests.Session()
+
+    try:
+        response = client.get(
+            f"{GITHUB_API_BASE_URL}/repos/{owner}/{repo}/languages",
+            headers=_build_headers(),
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+    except RequestException:
+        return {}
+
+    if not response.ok:
+        return {}
+
+    try:
+        payload = response.json()
+    except ValueError:
+        return {}
+
+    if not isinstance(payload, dict):
+        return {}
+
+    # GitHub maps language name -> bytes of code (positive ints). Keep only
+    # well-formed, positive entries (and reject bools, which are ints in Python) so
+    # a malformed value cannot poison detection.
+    languages: dict[str, int] = {}
+    for name, size in payload.items():
+        if (
+            isinstance(name, str)
+            and isinstance(size, int)
+            and not isinstance(size, bool)
+            and size > 0
+        ):
+            languages[name] = size
+    return languages
+
+
+# GETs a GitHub /stats/* endpoint, handling the shared quirks of that family: the
+# stats are computed lazily, so the first request for a repo returns 202 with no
+# body while GitHub builds the cache (retried a bounded number of times, then a
+# retryable "still computing" error), and an empty repository returns 204 (surfaced
+# as None). Returns the 200 response for the caller to parse. The sleep function is
+# injectable so tests never actually wait. Shared by both commit-activity fetchers.
+def _request_repo_stats(
+    client: requests.Session,
+    url: str,
+    max_attempts: int,
+    retry_delay: float,
+    sleep,
+) -> requests.Response | None:
+    for attempt in range(max_attempts):
+        try:
+            response = client.get(
+                url,
+                headers=_build_headers(),
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+        except RequestException as exc:
+            raise GitHubCommitActivityError(
+                "RepoFrame could not reach GitHub for commit activity.",
+                502,
+            ) from exc
+
+        if response.status_code == 202:
+            if attempt < max_attempts - 1:
+                sleep(retry_delay)
+                continue
+            raise GitHubCommitActivityError(
+                "GitHub is still preparing commit statistics for this repository. "
+                "Please try again in a moment.",
+                503,
+            )
+
+        if response.status_code == 204:
+            return None
+
+        if response.status_code == 404:
+            raise GitHubCommitActivityError(
+                "GitHub could not find commit activity for that repository.",
+                404,
+            )
+
+        if response.status_code == 403:
+            if response.headers.get("x-ratelimit-remaining") == "0":
+                raise GitHubCommitActivityError(
+                    "GitHub rate limit reached. Add a GITHUB_TOKEN on the backend "
+                    "or try again later.",
+                    429,
+                )
+            raise GitHubCommitActivityError(
+                "GitHub denied access to that repository's commit activity.",
+                403,
+            )
+
+        if response.status_code >= 500:
+            raise GitHubCommitActivityError(
+                "GitHub is not available right now. Please try again.",
+                502,
+            )
+
+        if not response.ok:
+            raise GitHubCommitActivityError(
+                "RepoFrame could not fetch commit activity for that repository.",
+                502,
+            )
+
+        return response
+
+    # Only reached if max_attempts is 0; kept so the function always returns/raises.
+    raise GitHubCommitActivityError(
+        "GitHub is still preparing commit statistics for this repository. "
+        "Please try again in a moment.",
+        503,
+    )
+
+
+# Fetches the last year of weekly commit counts (with daily breakdowns) for the
+# repository's default branch from GitHub's /stats/commit_activity endpoint — one
+# call, ~52 weekly buckets. Used for the "1 month" (daily) and "1 year" (weekly)
+# timeline ranges. An empty repository yields an empty list.
+def fetch_commit_activity(
+    owner: str,
+    repo: str,
+    session: requests.Session | None = None,
+    max_attempts: int = COMMIT_STATS_MAX_ATTEMPTS,
+    retry_delay: float = COMMIT_STATS_RETRY_DELAY_SECONDS,
+    sleep=time.sleep,
+) -> list[WeeklyCommitCount]:
+    client = session or requests.Session()
+    url = f"{GITHUB_API_BASE_URL}/repos/{owner}/{repo}/stats/commit_activity"
+    response = _request_repo_stats(client, url, max_attempts, retry_delay, sleep)
+    if response is None:
+        return []
+    return _parse_commit_activity_response(response)
+
+
+# Fetches the repository's FULL commit history as weekly totals from GitHub's
+# /stats/contributors endpoint, summing every contributor's weekly commit counts
+# into one series (used for the "all time" range, where the adaptive interval ladder
+# picks a coarser grain). Returns the weekly totals plus a flag that is True when the
+# result may be truncated — GitHub caps this endpoint at the top 100 contributors, so
+# a repo with more can undercount (the timeline SHAPE stays representative). An empty
+# repository yields an empty list.
+def fetch_contributor_weeks(
+    owner: str,
+    repo: str,
+    session: requests.Session | None = None,
+    max_attempts: int = COMMIT_STATS_MAX_ATTEMPTS,
+    retry_delay: float = COMMIT_STATS_RETRY_DELAY_SECONDS,
+    sleep=time.sleep,
+) -> tuple[list[WeeklyCommitCount], bool]:
+    client = session or requests.Session()
+    url = f"{GITHUB_API_BASE_URL}/repos/{owner}/{repo}/stats/contributors"
+    response = _request_repo_stats(client, url, max_attempts, retry_delay, sleep)
+    if response is None:
+        return [], False
+    return _parse_contributor_weeks_response(response)
 
 
 # Fetches GitHub's recursive tree for the default branch without file contents.
@@ -357,7 +565,151 @@ def _parse_metadata_response(response: requests.Response) -> GitHubRepoMetadata:
         forks=_required_int(payload, "forks_count"),
         language=_optional_string(payload, "language"),
         html_url=_required_string(payload, "html_url"),
+        topics=_parse_topics(payload),
+        license=_parse_license(payload),
     )
+
+
+# Converts GitHub's /stats/commit_activity JSON (a list of weekly objects, each
+# with a Unix "week" start and a "total" commit count) into normalized weekly
+# counts, sorted oldest-first. Malformed entries are skipped rather than failing the
+# whole series, and a non-list payload is a systemic format error.
+def _parse_commit_activity_response(
+    response: requests.Response,
+) -> list[WeeklyCommitCount]:
+    try:
+        raw_payload = response.json()
+    except ValueError as exc:
+        raise GitHubCommitActivityError(
+            "GitHub returned an unreadable commit-activity response.",
+            502,
+        ) from exc
+
+    if not isinstance(raw_payload, list):
+        raise GitHubCommitActivityError(
+            "GitHub returned commit activity in an unexpected format.",
+            502,
+        )
+
+    weeks: list[WeeklyCommitCount] = []
+    for item in raw_payload:
+        if not isinstance(item, dict):
+            continue
+        week = item.get("week")
+        total = item.get("total")
+        if (
+            isinstance(week, int)
+            and not isinstance(week, bool)
+            and isinstance(total, int)
+            and not isinstance(total, bool)
+        ):
+            weeks.append(
+                WeeklyCommitCount(
+                    week_start=week,
+                    total=total,
+                    days=_parse_daily_counts(item.get("days")),
+                )
+            )
+
+    weeks.sort(key=lambda week: week.week_start)
+    return weeks
+
+
+# Reads the seven daily counts (Sun–Sat) from a commit-activity week. Only a clean
+# 7-int array is accepted, so a malformed value yields no daily data (the week's
+# total is still used) rather than a misaligned week.
+def _parse_daily_counts(days: object) -> tuple[int, ...]:
+    if (
+        isinstance(days, list)
+        and len(days) == 7
+        and all(isinstance(day, int) and not isinstance(day, bool) for day in days)
+    ):
+        return tuple(days)
+    return ()
+
+
+# Sums GitHub's /stats/contributors JSON (a list of contributors, each with a weekly
+# array of commit counts) into one full-history weekly series, oldest-first. Returns
+# the weekly totals plus a truncation flag: GitHub returns at most the top 100
+# contributors, so a list at that cap may be incomplete. Malformed entries are
+# skipped; a non-list payload is a systemic format error.
+def _parse_contributor_weeks_response(
+    response: requests.Response,
+) -> tuple[list[WeeklyCommitCount], bool]:
+    try:
+        raw_payload = response.json()
+    except ValueError as exc:
+        raise GitHubCommitActivityError(
+            "GitHub returned an unreadable contributor-stats response.",
+            502,
+        ) from exc
+
+    if not isinstance(raw_payload, list):
+        raise GitHubCommitActivityError(
+            "GitHub returned contributor stats in an unexpected format.",
+            502,
+        )
+
+    totals_by_week: dict[int, int] = {}
+    for contributor in raw_payload:
+        if not isinstance(contributor, dict):
+            continue
+        contributor_weeks = contributor.get("weeks")
+        if not isinstance(contributor_weeks, list):
+            continue
+        for week in contributor_weeks:
+            if not isinstance(week, dict):
+                continue
+            week_start = week.get("w")
+            commits = week.get("c")
+            if (
+                isinstance(week_start, int)
+                and not isinstance(week_start, bool)
+                and isinstance(commits, int)
+                and not isinstance(commits, bool)
+            ):
+                totals_by_week[week_start] = totals_by_week.get(week_start, 0) + commits
+
+    weeks = [
+        WeeklyCommitCount(week_start=week_start, total=total)
+        for week_start, total in sorted(totals_by_week.items())
+    ]
+    # GitHub caps this endpoint at the top 100 contributors; a full list may be
+    # missing the long tail.
+    truncated = len(raw_payload) >= 100
+    return weeks, truncated
+
+
+# Reads the repository's subject topics from the metadata payload. Best-effort:
+# these enrich (not gate) the response, so a missing or malformed `topics` value
+# yields an empty list rather than failing the whole metadata parse. Only non-empty
+# string entries are kept.
+def _parse_topics(payload: Mapping[str, object]) -> list[str]:
+    raw_topics = payload.get("topics")
+    if not isinstance(raw_topics, list):
+        return []
+
+    return [topic for topic in raw_topics if isinstance(topic, str) and topic]
+
+
+# Reads the detected license's short identifier from the metadata payload's
+# `license` object, preferring the SPDX id (e.g. "MIT") and falling back to its
+# name. Best-effort like topics: "NOASSERTION" (GitHub's unrecognized-license
+# marker), a missing object, or a malformed value all resolve to None.
+def _parse_license(payload: Mapping[str, object]) -> str | None:
+    license_object = payload.get("license")
+    if not isinstance(license_object, dict):
+        return None
+
+    spdx_id = license_object.get("spdx_id")
+    if isinstance(spdx_id, str) and spdx_id and spdx_id != "NOASSERTION":
+        return spdx_id
+
+    name = license_object.get("name")
+    if isinstance(name, str) and name and name != "NOASSERTION":
+        return name
+
+    return None
 
 
 # Converts GitHub's recursive tree JSON into normalized repo-file entries and

@@ -153,6 +153,75 @@ class TechStackDetectorTests(unittest.TestCase):
 
         self.assertEqual(technologies, [])
 
+    def test_languages_breakdown_surfaces_secondary_languages(self) -> None:
+        # The openjdk/jdk case: metadata only reports the primary language (Java),
+        # so the secondary languages must come from the /languages breakdown.
+        technologies = detect_tech_stack(
+            make_metadata(language="Java"),
+            [],
+            [],
+            languages={
+                "Java": 500_000,
+                "C++": 200_000,
+                "C": 120_000,
+                "Assembly": 30_000,
+            },
+        )
+        names = {technology.name for technology in technologies}
+
+        self.assertIn("Java", names)
+        self.assertIn("C++", names)
+        self.assertIn("C", names)
+        self.assertIn("Assembly", names)
+        # Categories resolve to Language for the newly-added entries.
+        by_name = {technology.name: technology for technology in technologies}
+        self.assertEqual(by_name["C++"].category, "Language")
+        self.assertEqual(by_name["Assembly"].category, "Language")
+
+    def test_languages_below_one_percent_are_dropped(self) -> None:
+        # A tiny tail language (well under 1% of bytes) must not clutter the stack.
+        technologies = detect_tech_stack(
+            make_metadata(language="Python"),
+            [],
+            [],
+            languages={
+                "Python": 990_000,
+                "Shell": 500,  # ~0.05% — below the 1% threshold
+            },
+        )
+        names = {technology.name for technology in technologies}
+
+        self.assertIn("Python", names)
+        self.assertNotIn("Shell", names)
+
+    def test_languages_alias_merges_into_canonical_name(self) -> None:
+        # GitHub's "Dockerfile" language maps onto the existing Docker technology.
+        technologies = detect_tech_stack(
+            make_metadata(language="Go"),
+            [],
+            [],
+            languages={"Go": 800_000, "Dockerfile": 200_000},
+        )
+        names = {technology.name for technology in technologies}
+
+        self.assertIn("Docker", names)
+        self.assertNotIn("Dockerfile", names)
+
+    def test_primary_language_gains_confidence_from_two_sources(self) -> None:
+        # When metadata AND the breakdown agree on the primary language, both
+        # sources attach as evidence (raising its confidence over a lone signal).
+        technologies = detect_tech_stack(
+            make_metadata(language="Java"),
+            [],
+            [],
+            languages={"Java": 1_000_000},
+        )
+        java = next(item for item in technologies if item.name == "Java")
+        sources = {evidence.source for evidence in java.evidence}
+
+        self.assertIn("GitHub metadata", sources)
+        self.assertIn("GitHub languages", sources)
+
 
 # Covers the shared evidence-fetching helper used by both routes that run stack
 # detection: it returns fetched files and tolerates the expected per-file gaps

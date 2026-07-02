@@ -6,10 +6,14 @@ from requests import RequestException
 
 from app.services.github_service import (
     GITHUB_TOKEN_ENV,
+    GitHubCommitActivityError,
     GitHubFileContentError,
     GitHubMetadataError,
     GitHubRateLimitError,
     GitHubTreeError,
+    fetch_commit_activity,
+    fetch_contributor_weeks,
+    fetch_repo_languages,
     fetch_repo_metadata,
     fetch_rate_limit,
     fetch_repo_text_file,
@@ -68,6 +72,189 @@ class GitHubServiceTests(unittest.TestCase):
         self.assertEqual(metadata.forks, 45)
         self.assertEqual(metadata.language, "TypeScript")
         self.assertEqual(metadata.html_url, "https://github.com/openai/codex")
+
+    def test_parses_topics_and_license_from_metadata(self) -> None:
+        session = Mock()
+        session.get.return_value = FakeResponse(
+            status_code=200,
+            payload={
+                "name": "codex",
+                "description": "Coding agent",
+                "default_branch": "main",
+                "stargazers_count": 1,
+                "forks_count": 2,
+                "language": "TypeScript",
+                "html_url": "https://github.com/openai/codex",
+                "topics": ["cli", "ai", 3, ""],
+                "license": {"spdx_id": "MIT", "name": "MIT License"},
+            },
+        )
+
+        metadata = fetch_repo_metadata("openai", "codex", session=session)
+
+        # Non-string / empty topics are dropped; the SPDX id is preferred.
+        self.assertEqual(metadata.topics, ["cli", "ai"])
+        self.assertEqual(metadata.license, "MIT")
+
+    def test_metadata_tolerates_missing_topics_and_unrecognized_license(self) -> None:
+        session = Mock()
+        session.get.return_value = FakeResponse(
+            status_code=200,
+            payload={
+                "name": "codex",
+                "description": None,
+                "default_branch": "main",
+                "stargazers_count": 0,
+                "forks_count": 0,
+                "language": None,
+                "html_url": "https://github.com/openai/codex",
+                # topics absent entirely; license present but unrecognized.
+                "license": {"spdx_id": "NOASSERTION", "name": "NOASSERTION"},
+            },
+        )
+
+        metadata = fetch_repo_metadata("openai", "codex", session=session)
+
+        self.assertEqual(metadata.topics, [])
+        self.assertIsNone(metadata.license)
+
+    def test_fetches_language_breakdown(self) -> None:
+        session = Mock()
+        session.get.return_value = FakeResponse(
+            status_code=200,
+            payload={"Java": 500, "C++": 200, "Assembly": 30},
+        )
+
+        languages = fetch_repo_languages("openjdk", "jdk", session=session)
+
+        self.assertEqual(languages, {"Java": 500, "C++": 200, "Assembly": 30})
+        requested_url = session.get.call_args.args[0]
+        self.assertTrue(requested_url.endswith("/repos/openjdk/jdk/languages"))
+
+    def test_language_breakdown_rejects_malformed_entries(self) -> None:
+        # Non-int, non-positive, and boolean sizes must be dropped rather than
+        # poisoning detection (bools are ints in Python, so they are guarded too).
+        session = Mock()
+        session.get.return_value = FakeResponse(
+            status_code=200,
+            payload={"Java": 500, "Bad": "x", "Zero": 0, "Flag": True},
+        )
+
+        languages = fetch_repo_languages("openjdk", "jdk", session=session)
+
+        self.assertEqual(languages, {"Java": 500})
+
+    def test_language_breakdown_is_best_effort_on_failure(self) -> None:
+        # A failed languages call must not break analysis: it returns {} so
+        # detection falls back to the primary language and file signals.
+        session = Mock()
+        session.get.return_value = FakeResponse(status_code=500)
+        self.assertEqual(fetch_repo_languages("openjdk", "jdk", session=session), {})
+
+        session.get.side_effect = RequestException("network failed")
+        self.assertEqual(fetch_repo_languages("openjdk", "jdk", session=session), {})
+
+    def test_fetches_commit_activity_weeks(self) -> None:
+        session = Mock()
+        session.get.return_value = FakeResponse(
+            status_code=200,
+            payload=[
+                {"week": 1_600_604_800, "total": 4, "days": [0, 1, 1, 0, 1, 1, 0]},
+                {"week": 1_600_000_000, "total": 2, "days": [0, 0, 1, 0, 0, 1, 0]},
+            ],
+        )
+
+        weeks = fetch_commit_activity("openai", "codex", session=session)
+
+        # Sorted oldest-first regardless of GitHub's ordering.
+        self.assertEqual([week.week_start for week in weeks], [1_600_000_000, 1_600_604_800])
+        self.assertEqual([week.total for week in weeks], [2, 4])
+        requested_url = session.get.call_args.args[0]
+        self.assertTrue(requested_url.endswith("/repos/openai/codex/stats/commit_activity"))
+
+    def test_commit_activity_retries_while_computing_then_succeeds(self) -> None:
+        # 202 means GitHub is still building the stats cache; a bounded retry should
+        # pick up the data once it is ready (sleep is stubbed so the test is instant).
+        session = Mock()
+        session.get.side_effect = [
+            FakeResponse(status_code=202),
+            FakeResponse(status_code=200, payload=[{"week": 1_600_000_000, "total": 7}]),
+        ]
+
+        weeks = fetch_commit_activity(
+            "openai", "codex", session=session, sleep=lambda _seconds: None
+        )
+
+        self.assertEqual(len(weeks), 1)
+        self.assertEqual(weeks[0].total, 7)
+        self.assertEqual(session.get.call_count, 2)
+
+    def test_commit_activity_still_computing_raises_retryable_error(self) -> None:
+        session = Mock()
+        session.get.return_value = FakeResponse(status_code=202)
+
+        with self.assertRaises(GitHubCommitActivityError) as ctx:
+            fetch_commit_activity(
+                "openai", "codex", session=session, sleep=lambda _seconds: None
+            )
+
+        self.assertEqual(ctx.exception.status_code, 503)
+
+    def test_commit_activity_empty_repository_returns_no_weeks(self) -> None:
+        session = Mock()
+        session.get.return_value = FakeResponse(status_code=204)
+
+        self.assertEqual(fetch_commit_activity("openai", "empty", session=session), [])
+
+    def test_commit_activity_parses_daily_breakdown(self) -> None:
+        session = Mock()
+        session.get.return_value = FakeResponse(
+            status_code=200,
+            payload=[
+                {"week": 1_600_000_000, "total": 3, "days": [0, 1, 0, 2, 0, 0, 0]},
+            ],
+        )
+
+        weeks = fetch_commit_activity("openai", "codex", session=session)
+
+        self.assertEqual(weeks[0].days, (0, 1, 0, 2, 0, 0, 0))
+
+    def test_contributor_weeks_sums_across_contributors(self) -> None:
+        session = Mock()
+        session.get.return_value = FakeResponse(
+            status_code=200,
+            payload=[
+                {"weeks": [{"w": 1_600_000_000, "c": 2}, {"w": 1_600_604_800, "c": 1}]},
+                {"weeks": [{"w": 1_600_000_000, "c": 3}, {"w": 1_600_604_800, "c": 0}]},
+            ],
+        )
+
+        weeks, truncated = fetch_contributor_weeks("openjdk", "jdk", session=session)
+
+        # Summed per week, oldest-first.
+        self.assertEqual([week.week_start for week in weeks], [1_600_000_000, 1_600_604_800])
+        self.assertEqual([week.total for week in weeks], [5, 1])
+        self.assertFalse(truncated)
+        requested_url = session.get.call_args.args[0]
+        self.assertTrue(requested_url.endswith("/repos/openjdk/jdk/stats/contributors"))
+
+    def test_contributor_weeks_flags_possible_truncation(self) -> None:
+        # GitHub caps this endpoint at 100 contributors; a full list may be truncated.
+        session = Mock()
+        session.get.return_value = FakeResponse(
+            status_code=200,
+            payload=[{"weeks": [{"w": 1_600_000_000, "c": 1}]}] * 100,
+        )
+
+        _weeks, truncated = fetch_contributor_weeks("big", "repo", session=session)
+
+        self.assertTrue(truncated)
+
+    def test_contributor_weeks_empty_repository(self) -> None:
+        session = Mock()
+        session.get.return_value = FakeResponse(status_code=204)
+
+        self.assertEqual(fetch_contributor_weeks("openai", "empty", session=session), ([], False))
 
     def test_supports_optional_github_token_header(self) -> None:
         session = Mock()

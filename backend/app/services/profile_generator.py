@@ -77,12 +77,16 @@ def build_profile_prompt(
 ) -> str:
     description = metadata.description or "(no description)"
     language = metadata.language or "(unknown)"
+    topics = ", ".join(metadata.topics) if metadata.topics else "(none)"
+    license_name = metadata.license or "(none)"
 
     return (
         "REPOSITORY METADATA\n"
         f"- Name: {metadata.name}\n"
         f"- Description: {description}\n"
         f"- Primary language: {language}\n"
+        f"- Topics: {topics}\n"
+        f"- License: {license_name}\n"
         f"- Stars: {metadata.stars}, Forks: {metadata.forks}\n\n"
         "DETECTED TECH STACK\n"
         f"{_format_tech_stack(technologies)}\n\n"

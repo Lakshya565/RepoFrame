@@ -18,6 +18,13 @@ from app.services.github_service import (
 MAX_STACK_EVIDENCE_FILES = 8
 MAX_STACK_EVIDENCE_FILE_SIZE_BYTES = 80_000
 
+# Languages below this share of the repository's total code bytes (per GitHub's
+# /languages breakdown) are dropped from detection, so a tiny tail — a stray shell
+# script, a single Dockerfile — does not clutter the detected stack. At 1% a
+# genuinely secondary language (e.g. C++/Assembly in a mostly-Java repo) still
+# shows, while incidental files fall away.
+MIN_LANGUAGE_BYTE_SHARE = 0.01
+
 MANIFEST_FILE_NAMES = {
     "package.json",
     "requirements.txt",
@@ -132,6 +139,15 @@ CONFIG_TECHNOLOGIES = {
     "vite.config.ts": "Vite",
 }
 
+# Maps a few GitHub /languages names to the canonical tech name RepoFrame already
+# uses, so the language breakdown merges with (rather than duplicates) other
+# signals. Names GitHub reports the same way we display them (Java, Python, C++, …)
+# need no entry and pass through unchanged.
+GITHUB_LANGUAGE_ALIASES = {
+    "Dockerfile": "Docker",
+    "SCSS": "Sass",
+}
+
 README_KEYWORDS = {
     "C#": ("c#",),
     "CSS": ("css",),
@@ -164,11 +180,18 @@ README_KEYWORDS = {
 
 TECH_CATEGORIES = {
     "Angular": "Frontend",
+    "Assembly": "Language",
+    "C": "Language",
     "C#": "Language",
+    "C++": "Language",
+    "Clojure": "Language",
+    "CMake": "Tooling",
     "CSS": "Frontend",
     "Django": "Backend",
+    "Dart": "Language",
     "Docker": "Infrastructure",
     "Electron": "Runtime",
+    "Elixir": "Language",
     "ESLint": "Tooling",
     "Express": "Backend",
     "FastAPI": "Backend",
@@ -176,17 +199,25 @@ TECH_CATEGORIES = {
     "Flask": "Backend",
     "GitHub Actions": "Infrastructure",
     "Go": "Language",
+    "Groovy": "Language",
+    "Haskell": "Language",
     "HTML": "Frontend",
     "Java": "Language",
     "JavaScript": "Language",
     "Jest": "Testing",
     "Kotlin": "Language",
+    "Lua": "Language",
+    "Makefile": "Tooling",
     "NestJS": "Backend",
     "Next.js": "Framework",
     "Node.js": "Runtime",
     "NumPy": "Data",
+    "Objective-C": "Language",
     "OpenCV": "Computer vision",
+    "Perl": "Language",
     "PHP": "Language",
+    "PowerShell": "Language",
+    "R": "Language",
     "Pandas": "Data",
     "PostCSS": "Tooling",
     "PostgreSQL": "Database",
@@ -199,6 +230,8 @@ TECH_CATEGORIES = {
     "Requests": "Backend",
     "Ruby": "Language",
     "Rust": "Language",
+    "Scala": "Language",
+    "Shell": "Language",
     "SQL": "Database",
     "SQLAlchemy": "Database",
     "SQLite": "Database",
@@ -302,6 +335,7 @@ def detect_tech_stack(
     metadata: GitHubRepoMetadata,
     ranked_files: list[RankedRepoFile],
     evidence_files: list[GitHubTextFileContent],
+    languages: dict[str, int] | None = None,
 ) -> list[DetectedTechnology]:
     detections: dict[str, list[TechStackEvidence]] = defaultdict(list)
 
@@ -314,6 +348,12 @@ def detect_tech_stack(
                 detail=f"GitHub reports {metadata.language} as the primary language.",
             ),
         )
+
+    # The /languages byte breakdown is the authoritative source for the FULL
+    # language mix (metadata.language is only the top one), so a polyglot repo shows
+    # every meaningful language rather than just its largest.
+    if languages:
+        _detect_from_languages(detections, languages)
 
     _detect_from_paths(detections, ranked_files)
 
@@ -378,6 +418,40 @@ def _add_evidence(
 
     if evidence_key not in existing_keys:
         detections[technology].append(evidence)
+
+
+# Detects languages from GitHub's /languages byte breakdown — the authoritative
+# source for a repo's real language mix. Languages below MIN_LANGUAGE_BYTE_SHARE of
+# the total code bytes are dropped so a tiny tail (a stray script, a Dockerfile)
+# does not clutter the stack. Each kept language records its byte share as evidence,
+# which also signals prominence to the user and to later generation.
+def _detect_from_languages(
+    detections: dict[str, list[TechStackEvidence]],
+    languages: dict[str, int],
+) -> None:
+    total_bytes = sum(languages.values())
+    if total_bytes <= 0:
+        return
+
+    for raw_name, size in languages.items():
+        share = size / total_bytes
+        if share < MIN_LANGUAGE_BYTE_SHARE:
+            continue
+
+        # GitHub's name is what the evidence quotes; the aliased name is what the
+        # detection merges under (e.g. Dockerfile -> Docker).
+        name = GITHUB_LANGUAGE_ALIASES.get(raw_name, raw_name)
+        _add_evidence(
+            detections,
+            name,
+            TechStackEvidence(
+                source="GitHub languages",
+                detail=(
+                    f"GitHub reports {raw_name} as {share:.0%} of the "
+                    "repository's code."
+                ),
+            ),
+        )
 
 
 # Uses the important-file paths from Phase 5 for language, framework, config,

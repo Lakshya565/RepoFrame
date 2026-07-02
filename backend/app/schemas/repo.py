@@ -36,6 +36,54 @@ class RepoMetadataResponse(BaseModel):
     forks: int
     language: str | None
     html_url: str = Field(alias="htmlUrl")
+    # Maintainer-applied subject tags (may be empty) and the detected license's
+    # short id (e.g. "MIT"), or null when unlicensed/unrecognized.
+    topics: list[str] = Field(default_factory=list)
+    license: str | None = None
+
+
+# The time window for the commit-activity timeline: the last month (daily points),
+# the last year (weekly), or the full history (adaptive grain).
+CommitActivityRange = Literal["month", "year", "all"]
+
+
+# Request body for commit activity: the repo URL plus which time range to chart.
+class CommitActivityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    repo_url: StrictStr = Field(alias="repoUrl", min_length=1, max_length=2048)
+    range: CommitActivityRange = "year"
+
+
+# One bar in the commit-activity timeline: the UTC ISO date the bucket starts on
+# and the commits summed into it.
+class CommitTimelineBucket(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    period_start: str = Field(alias="periodStart")
+    commit_count: int = Field(alias="commitCount")
+
+
+# The commit-activity timeline for the Analysis-page graph: the bars plus the chosen
+# grain's label, the total commits across the window, the window's start/end dates
+# (null when the repository has no commit activity), the range that was charted, and
+# whether the "all time" data may be truncated (GitHub caps contributor stats at the
+# top 100 contributors, so a very large repo can undercount).
+class CommitActivityResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    owner: str
+    repo: str
+    normalized_url: str = Field(alias="normalizedUrl")
+    range: CommitActivityRange
+    interval_label: str = Field(alias="intervalLabel")
+    total_commits: int = Field(alias="totalCommits")
+    range_start: str | None = Field(default=None, alias="rangeStart")
+    range_end: str | None = Field(default=None, alias="rangeEnd")
+    contributors_truncated: bool = Field(
+        default=False, alias="contributorsTruncated"
+    )
+    buckets: list[CommitTimelineBucket]
 
 
 # One normalized file-tree entry returned from GitHub's tree API. RepoFrame uses
