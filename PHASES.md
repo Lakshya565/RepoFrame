@@ -503,29 +503,52 @@ Deferred from Phase 13 into Phase 14 so it lands with the rest of the UI work.
 
 ---
 
-# Phase 15: Save Projects with Supabase
+# Phase 15: Save Projects with Supabase + GitHub Auth (App) & Private Repos
 
 Only do this after the local MVP works.
+
+> **Scope updated 2026-07-05.** Auth is now IN for Phase 15: GitHub login for accounts
+> and, via a **GitHub App** (not the broad OAuth `repo` scope), fine-grained, read-only,
+> per-repo access so users can analyze their **private** repos. The full, structured,
+> sub-phased build plan — including exactly what I must register/provide, the env vars,
+> the security model, and per-sub-phase tests — lives in **`PHASE_15_PLAN.md`**. Build
+> from that document, sub-phase by sub-phase (15.0 → 15.8).
 
 ## Build
 
 ```text
-Supabase setup
-projects table
-generated_outputs table
-claim_verifications table
-usage_metrics table
-save/load project profiles
-session history
-optional auth later
+Supabase setup (projects, generated_outputs, claim_verifications, usage_metrics,
+  user_installations tables; RLS on)
+Identity via Supabase Auth GitHub OAuth (identity scopes only) -> real user_id
+Repo access via a GitHub App (Contents+Metadata read-only) with per-repo install
+  selection (all / public-only / selected); EPHEMERAL installation tokens, none stored
+save/load project snapshots + auto-save
+session history + a saved projects page
+thread installation tokens through the GitHub service for private-repo analysis
+migrate the lifetime usage ledger into Supabase behind its existing interface
 ```
 
 ## Codex Prompt
 
 ```text
-Add Supabase persistence for generated project profiles, outputs, claim verifications, and basic usage metrics. Create database models or API logic for saving repo metadata, user context, project profiles, generated outputs, claim verification results, and analysis metrics.
+Implement Phase 15 by following PHASE_15_PLAN.md one sub-phase at a time (15.0 -> 15.8),
+verifying each before the next.
 
-Keep auth optional for now. Add a simple saved projects page that lists saved analyses and lets the user reopen them. Do not add payments, teams, or complex permissions yet.
+Add Supabase persistence for saved project snapshots (repo metadata, user context,
+project profile, generated outputs, claim verifications, usage). Add accounts: identity
+via Supabase Auth's GitHub OAuth provider (identity scopes only) giving a real user_id;
+repo access via a separate GitHub App with read-only Contents+Metadata permission, so a
+user installs it on all or selected repositories (public and/or private). Mint short-lived
+installation tokens per request and NEVER store a repo token; store only the
+user<->installation mapping (verified by ownership). Verify the Supabase JWT on the backend,
+scope every row by user_id, and turn RLS on. Add a saved projects page + History tab that
+list and reopen saved analyses.
+
+Security is first-class: least-privilege read-only App, ephemeral tokens, private key and
+all secrets backend-only (only the Supabase URL + anon key are public), webhook signature
+verification, and strict per-user isolation. Keep the signed-out public-repo flow working
+exactly as today. Do not add payments, teams, or complex permissions. Keep every test
+offline and zero-token (fake repos, fake HTTP client, crafted JWTs).
 ```
 
 ---
