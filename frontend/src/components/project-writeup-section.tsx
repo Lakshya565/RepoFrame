@@ -22,6 +22,7 @@ import {
   generateInterviewPrep,
   generateOutputs,
   generateProfile,
+  reviseInterviewPrep,
   reviseOutput,
   verifyClaimsStream,
   type GeneratedOutputs,
@@ -328,6 +329,33 @@ export function ProjectWriteupSection({
     }
   }
 
+  // Revises the existing interview prep from the current topics plus an optional
+  // instruction (the feedback-driven "Regenerate"). Reuses the "interview" busy
+  // kind so the interview card is locked during either a generate or a revise.
+  async function handleReviseInterview(instruction: string) {
+    if (busyTask || interviewTopics === null) {
+      return;
+    }
+    setBusyTask({ kind: "interview" });
+    setError(null);
+
+    try {
+      const activeProfile = await ensureProfile();
+      const response = await reviseInterviewPrep(
+        activeProfile,
+        interviewTopics,
+        instruction,
+      );
+      setInterviewTopics(response.topics);
+      addUsage(response.usage);
+    } catch (caught) {
+      setError(messageOf(caught, "RepoFrame could not regenerate interview prep."));
+    } finally {
+      setBusyTask(null);
+      refreshLifetime();
+    }
+  }
+
   // Runs the bounded verification agent over every generated output. Opt-in: it
   // only fires on an explicit press, never as part of the default flow, so it
   // cannot spend tokens without a deliberate click. Uses the STREAMING endpoint so
@@ -421,6 +449,7 @@ export function ProjectWriteupSection({
               onGenerateInterview={handleGenerateInterview}
               onGenerateSection={handleGenerateSection}
               onOutputsChange={setOutputs}
+              onReviseInterview={handleReviseInterview}
               onReviseSection={handleReviseSection}
               outputs={outputs}
               revisingSection={revisingSection}
@@ -472,7 +501,7 @@ function ContextStep({
             Continue with added context
           </Button>
           <Button variant="outline" onClick={onContinue}>
-            Generate with repo evidence only
+            Continue with repo evidence only
           </Button>
         </div>
         <p className="text-sm leading-6 text-muted-foreground">

@@ -104,3 +104,16 @@ class GenerateInterviewPrepResponse(BaseModel):
     model: str
     estimated_input_tokens: int = Field(alias="estimatedInputTokens")
     usage: UsageTotals
+
+
+# Request to revise the existing interview prep using feedback: the current topics
+# plus an optional instruction. Mirrors ReviseOutputRequest so interview prep gets
+# the same feedback-driven "Regenerate" as the other cards — it refines the current
+# prep rather than redoing it from scratch. The topic count is bounded as a backstop
+# against abuse; the instruction is length-capped like the other generation inputs.
+class ReviseInterviewPrepRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    profile: ProjectProfile
+    current_topics: list[InterviewTopic] = Field(alias="currentTopics", max_length=50)
+    instruction: str = Field(default="", max_length=400)

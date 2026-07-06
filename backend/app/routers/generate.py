@@ -15,6 +15,7 @@ from app.schemas.outputs import (
     GenerateInterviewPrepResponse,
     GenerateOutputsRequest,
     GenerateOutputsResponse,
+    ReviseInterviewPrepRequest,
     ReviseOutputRequest,
 )
 from app.schemas.profile import (
@@ -47,6 +48,7 @@ from app.services.llm_client import LLMError
 from app.services.output_generator import (
     generate_core_outputs,
     generate_interview_prep,
+    revise_interview_prep,
     revise_output,
 )
 from app.services.profile_generator import (
@@ -230,6 +232,32 @@ def generate_interview_prep_endpoint(
         with metrics_store.timed("llm"):
             topics, estimated_input_tokens, usage = generate_interview_prep(
                 request.profile, request.guidance
+            )
+    except LLMError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    usage_store.record(usage)
+
+    return GenerateInterviewPrepResponse(
+        topics=topics,
+        model=OPENAI_MODEL,
+        estimated_input_tokens=estimated_input_tokens,
+        usage=UsageTotals.from_usage(usage),
+    )
+
+
+# Revises the existing interview prep using the current topics plus an optional
+# instruction (the feedback-driven "Regenerate" for the interview card, matching
+# the section reviser). Returns the same shape as the interview-prep generate
+# endpoint so the frontend swaps the topics in without any special handling.
+@router.post("/interview-prep/revise", response_model=GenerateInterviewPrepResponse)
+def revise_interview_prep_endpoint(
+    request: ReviseInterviewPrepRequest,
+) -> GenerateInterviewPrepResponse:
+    try:
+        with metrics_store.timed("llm"):
+            topics, estimated_input_tokens, usage = revise_interview_prep(
+                request.profile, request.current_topics, request.instruction
             )
     except LLMError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc

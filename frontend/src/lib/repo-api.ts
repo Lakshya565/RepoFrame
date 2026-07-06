@@ -317,6 +317,22 @@ export async function generateInterviewPrep(
   );
 }
 
+// Revises the existing interview prep from the current topics plus an optional
+// instruction (the feedback-driven "Regenerate" for the interview card). Mirrors
+// reviseOutput: it refines the current prep instead of redoing it from scratch,
+// and returns the same shape as generateInterviewPrep.
+export async function reviseInterviewPrep(
+  profile: ProjectProfileData,
+  currentTopics: InterviewTopic[],
+  instruction: string,
+): Promise<GenerateInterviewPrepResponse> {
+  return postJson(
+    "/api/generate/interview-prep/revise",
+    { profile, currentTopics, instruction },
+    "RepoFrame could not regenerate interview prep.",
+  );
+}
+
 // Revises one existing section from the user's current draft plus an optional
 // instruction (feedback-driven regenerate). Returns the same shape as
 // generateOutputs with only the revised section populated.
@@ -362,24 +378,6 @@ export type VerifyClaimsResponse = {
   usage: UsageTotals;
 };
 
-// Runs the bounded verification agent over the generated outputs. Like interview
-// prep this is opt-in (an explicit press), so it never spends tokens in the
-// default flow. The backend rebuilds the repo evidence from the URL. An optional
-// sections list scopes a per-tab verification to specific tabs; omit it to verify
-// every tab that has content.
-export async function verifyClaims(
-  repoUrl: string,
-  userContext: UserContext,
-  outputs: GeneratedOutputs,
-  sections?: OutputSection[],
-): Promise<VerifyClaimsResponse> {
-  return postJson(
-    "/api/generate/verify",
-    { repoUrl, userContext, outputs, sections },
-    "RepoFrame could not verify the generated claims.",
-  );
-}
-
 // The real progress stages the verification agent passes through, in display
 // order. Mirrors the backend's closed stage vocabulary (claim_verifier) so the UI
 // checklist maps each event to a fixed step:
@@ -402,18 +400,19 @@ export type VerifyProgressEvent = {
 
 // The SSE frames the streaming endpoint emits, as a discriminated union. The
 // "result" frame carries the exact VerifyClaimsResponse shape (plus the tag), so a
-// completed stream parses identically to the one-shot /verify response.
+// completed stream parses identically to a plain JSON verify response.
 type VerifyStreamEvent =
   | ({ type: "result" } & VerifyClaimsResponse)
   | { type: "progress"; stage: VerifyStage; detail: string | null }
   | { type: "error"; detail: string; status: number };
 
-// Runs the bounded verification agent like verifyClaims, but over the STREAMING
+// Runs the bounded verification agent over the generated outputs via the STREAMING
 // endpoint: onProgress fires as each real stage is reached (so the UI checklist
 // tracks the agent's actual work), and the promise resolves with the final result
-// once the stream completes. Like verifyClaims it is opt-in — nothing runs until an
-// explicit press. A streamed { type: "error" } frame (or a pre-stream HTTP error)
-// rejects with the backend's message, matching the non-streaming error behavior.
+// once the stream completes. Like interview prep it is opt-in — nothing runs until
+// an explicit press, so it never spends tokens in the default flow. The backend
+// rebuilds the repo evidence from the URL. A streamed { type: "error" } frame (or a
+// pre-stream HTTP error) rejects with the backend's message.
 export async function verifyClaimsStream(
   repoUrl: string,
   userContext: UserContext,

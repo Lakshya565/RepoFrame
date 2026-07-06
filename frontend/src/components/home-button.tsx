@@ -21,10 +21,10 @@ type HomeButtonProps = {
 };
 
 // The top-left "Home" control. At rest it's just the word "Home"; on hover a
-// house icon pops up (scales + rises) into the space before the label, like the
-// interactive-hover-button pattern. Clicking does a full-page load to "/" so it
-// always lands on a fresh landing page rather than a cached client nav. The pop
-// is pure CSS group-hover and is disabled under prefers-reduced-motion.
+// house icon pops up (scales + rises) into the space before the label. Clicking
+// does a full-page load to "/" so it always lands on a fresh landing page rather
+// than a cached client nav. The pop is pure CSS group-hover and is disabled under
+// prefers-reduced-motion.
 export function HomeButton({ className }: HomeButtonProps) {
   return (
     <button

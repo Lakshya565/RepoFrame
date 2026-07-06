@@ -1,12 +1,14 @@
 import json
 import unittest
 
+from app.schemas.outputs import InterviewTopic
 from app.schemas.profile import ProfileEvidence, ProjectProfile
 from app.services.llm_client import CompletionResult, LLMError
 from app.services.output_generator import (
     ALL_SECTIONS,
     generate_core_outputs,
     generate_interview_prep,
+    revise_interview_prep,
     revise_output,
 )
 
@@ -190,6 +192,67 @@ class OutputGeneratorTests(unittest.TestCase):
                 make_profile(),
                 "readmeIntro",
                 current_text="draft",
+                instruction="",
+                completion_fn=fake_completion("not json"),
+            )
+        self.assertEqual(ctx.exception.status_code, 502)
+
+    def test_revise_interview_returns_revised_topics(self) -> None:
+        content = json.dumps(
+            {
+                "topics": [
+                    {
+                        "question": "How did you bound the evidence?",
+                        "talkingPoints": ["Ranked files", "Capped the prompt"],
+                    }
+                ]
+            }
+        )
+        current = [
+            InterviewTopic(question="Old question", talkingPoints=["Old point"])
+        ]
+
+        topics, tokens, _ = revise_interview_prep(
+            make_profile(),
+            current,
+            instruction="focus on the evidence pipeline",
+            completion_fn=fake_completion(content),
+        )
+
+        self.assertEqual(len(topics), 1)
+        self.assertEqual(topics[0].question, "How did you bound the evidence?")
+        self.assertEqual(topics[0].talking_points, ["Ranked files", "Capped the prompt"])
+        self.assertGreater(tokens, 0)
+
+    def test_revise_interview_includes_current_prep_and_instruction(self) -> None:
+        # The current topics and the instruction must both reach the prompt so the
+        # revision refines what the user sees rather than starting over.
+        captured: dict[str, str] = {}
+
+        def capturing(system: str, user: str) -> CompletionResult:
+            captured["user"] = user
+            return CompletionResult(
+                content=json.dumps(
+                    {"topics": [{"question": "Q", "talkingPoints": ["p"]}]}
+                )
+            )
+
+        revise_interview_prep(
+            make_profile(),
+            [InterviewTopic(question="Why FastAPI?", talkingPoints=["Speed"])],
+            instruction="add a systems-design angle",
+            completion_fn=capturing,
+        )
+
+        self.assertIn("Why FastAPI?", captured["user"])
+        self.assertIn("CURRENT INTERVIEW PREP", captured["user"])
+        self.assertIn("add a systems-design angle", captured["user"])
+
+    def test_revise_interview_malformed_json_raises_502(self) -> None:
+        with self.assertRaises(LLMError) as ctx:
+            revise_interview_prep(
+                make_profile(),
+                [InterviewTopic(question="Q", talkingPoints=["p"])],
                 instruction="",
                 completion_fn=fake_completion("not json"),
             )

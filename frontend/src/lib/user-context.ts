@@ -136,14 +136,6 @@ export const YOUR_CONTEXT_FIELDS: UserContextTextField[] = [
   },
 ];
 
-// The combined free-text questions (guess fields first, then user-only context).
-// Retained for any consumer that needs the full field set (e.g. equality or a
-// flat walk); the form renders the two groups above as separate sections.
-export const USER_CONTEXT_TEXT_FIELDS: UserContextTextField[] = [
-  ...INFERRED_GUESS_FIELDS,
-  ...YOUR_CONTEXT_FIELDS,
-];
-
 // The collaboration choices. Kept separate from the text fields because it is
 // rendered as a segmented choice rather than an input.
 export const COLLABORATION_OPTIONS: CollaborationOption[] = [
@@ -171,11 +163,4 @@ export function userContextEquals(a: UserContext, b: UserContext): boolean {
     a.impact === b.impact &&
     a.guardrails === b.guardrails
   );
-}
-
-// Maps a collaboration value to its display label, falling back to a clear
-// "Not provided" string so callers never render a raw enum value.
-export function getCollaborationLabel(value: CollaborationMode | ""): string {
-  const option = COLLABORATION_OPTIONS.find((item) => item.value === value);
-  return option ? option.label : "Not provided";
 }

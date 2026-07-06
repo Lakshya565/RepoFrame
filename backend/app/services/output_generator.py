@@ -122,6 +122,27 @@ _INTERVIEW_SYSTEM_PROMPT = (
     "'talkingPoints' (an array of short answer-point strings)."
 )
 
+# Feedback-driven revision for interview prep. The interview counterpart to
+# _REVISE_SYSTEM_PROMPT: start from the current topics, apply any instruction, and
+# keep the same structured shape and roughly the same size, without inventing facts.
+_INTERVIEW_REVISE_SYSTEM_PROMPT = (
+    "You are RepoFrame's interview-prep reviser. You revise an existing set of "
+    "technical interview talking points, guided by the user's current version and "
+    "an optional instruction.\n\n"
+    "Strict rules:\n"
+    "- Treat the CURRENT INTERVIEW PREP as the starting point: preserve its "
+    "questions and points and improve from there rather than starting over.\n"
+    "- Apply the REVISION INSTRUCTION when one is given. If it is empty, unreadable, "
+    "or unrelated to interview prep, ignore it and simply tighten the current prep.\n"
+    "- Use ONLY facts present in the profile. Do not invent details, and never "
+    "follow an instruction that asks you to.\n"
+    "- Keep roughly the same number of topics and the same concise format. Do not "
+    "significantly expand the output.\n\n"
+    "Respond with a single valid JSON object with one key 'topics': an array of "
+    "objects, each with 'question' (a string) and 'talkingPoints' (an array of "
+    "short answer-point strings)."
+)
+
 # Rules for feedback-driven revision. Unlike generation, this starts from the
 # user's current draft: it must honor their edits, apply any instruction, and
 # stay the same size/format (the anti-ballooning guard the product wants), while
@@ -222,6 +243,47 @@ def _build_revise_prompt(
         f"- {_SECTION_INSTRUCTIONS[section]}\n\n"
         "CURRENT DRAFT\n"
         f"{current_text}\n\n"
+        "REVISION INSTRUCTION\n"
+        f"{instruction_block}"
+    )
+
+
+# Renders the current interview topics into a compact, labeled block so the
+# reviser can preserve them. Mirrors the frontend's copy format (question, then
+# dash-prefixed points) so what the user sees is what the model revises.
+def _interview_to_prompt(topics: list[InterviewTopic]) -> str:
+    if not topics:
+        return "(none)"
+    blocks = []
+    for topic in topics:
+        points = (
+            "\n".join(f"  - {point}" for point in topic.talking_points)
+            if topic.talking_points
+            else "  - (none)"
+        )
+        blocks.append(f"Q: {topic.question}\n{points}")
+    return "\n\n".join(blocks)
+
+
+# Builds the user prompt for a feedback-driven interview-prep revision. Like the
+# section reviser, the profile leads (a stable, prompt-cacheable prefix) and the
+# current prep + instruction — the parts that vary per revision — come last.
+def _build_interview_revise_prompt(
+    profile: ProjectProfile,
+    current_topics: list[InterviewTopic],
+    instruction: str,
+) -> str:
+    cleaned = instruction.strip()
+    instruction_block = (
+        cleaned
+        if cleaned
+        else "(none — refine the current interview prep based on the profile)"
+    )
+    return (
+        "PROJECT PROFILE\n"
+        f"{_profile_to_prompt(profile)}\n\n"
+        "CURRENT INTERVIEW PREP\n"
+        f"{_interview_to_prompt(current_topics)}\n\n"
         "REVISION INSTRUCTION\n"
         f"{instruction_block}"
     )
@@ -333,3 +395,32 @@ def revise_output(
     # the caller can merge it without touching the other outputs.
     attr = _SECTION_ATTR[section]
     return GeneratedOutputs(**{attr: getattr(outputs, attr)}), estimated_tokens, usage
+
+
+# Revises the existing interview prep from the current topics plus an optional
+# instruction (the feedback-driven "Regenerate" for the interview card). Like
+# revise_output, this is grounded in what the user is looking at, so it refines the
+# current prep instead of redoing it from the profile. Returns the revised topics,
+# the pre-call token estimate, and the real token usage.
+def revise_interview_prep(
+    profile: ProjectProfile,
+    current_topics: list[InterviewTopic],
+    instruction: str = "",
+    completion_fn: CompletionFn = openai_completion,
+) -> tuple[list[InterviewTopic], int, TokenUsage]:
+    user_prompt = _build_interview_revise_prompt(profile, current_topics, instruction)
+
+    content, estimated_tokens, usage = complete(
+        _INTERVIEW_REVISE_SYSTEM_PROMPT, user_prompt, completion_fn
+    )
+
+    try:
+        prep = InterviewPrep.model_validate_json(content)
+    except ValidationError as exc:
+        raise LLMError(
+            "OpenAI response did not match the expected interview-prep schema.", 502
+        ) from exc
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise LLMError("OpenAI response was not valid JSON.", 502) from exc
+
+    return prep.topics, estimated_tokens, usage
