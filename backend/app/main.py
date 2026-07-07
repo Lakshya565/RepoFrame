@@ -5,7 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.routers import generate, github, metrics, repo, usage
+from app.routers import generate, github, github_app, metrics, projects, repo, usage
 from app.services import metrics_store
 from app.services.repo_parser import INVALID_REPO_URL_MESSAGE
 
@@ -63,6 +63,8 @@ app.include_router(github.router)
 app.include_router(generate.router)
 app.include_router(usage.router)
 app.include_router(metrics.router)
+app.include_router(projects.router)
+app.include_router(github_app.router)
 
 
 # Returns the same friendly URL error for malformed repo request payloads. This

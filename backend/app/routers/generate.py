@@ -6,8 +6,11 @@ import threading
 from collections import Counter
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+
+from app.services import repo_access
+from app.services.auth import AuthenticatedUser, require_user_when_configured
 
 from app.config import OPENAI_MODEL
 from app.schemas.outputs import (
@@ -61,7 +64,14 @@ from app.services.tech_stack_detector import (
     detect_tech_stack,
 )
 
-router = APIRouter(prefix="/api/generate", tags=["generate"])
+# Login gate (Phase 15.3): when Supabase is configured, every generation/verify
+# endpoint requires a verified user; when unconfigured (local dev), they stay open.
+# Applied at the router level so the gate can't be forgotten on a new route.
+router = APIRouter(
+    prefix="/api/generate",
+    tags=["generate"],
+    dependencies=[Depends(require_user_when_configured)],
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,9 +83,13 @@ logger = logging.getLogger(__name__)
 # single OpenAI call. All scoring, limit, and LLM logic lives in services; the
 # route only orchestrates and maps errors to HTTP responses.
 @router.post("/profile", response_model=GenerateProfileResponse)
-def generate_profile(request: GenerateProfileRequest) -> GenerateProfileResponse:
+def generate_profile(
+    request: GenerateProfileRequest,
+    user: AuthenticatedUser | None = Depends(require_user_when_configured),
+) -> GenerateProfileResponse:
     try:
         parsed_repo = parse_github_repo_url(request.repo_url)
+        repo_access.apply_repo_access(user, parsed_repo.owner, parsed_repo.repo)
         metadata = fetch_repo_metadata(parsed_repo.owner, parsed_repo.repo)
         tree = fetch_repo_tree(
             parsed_repo.owner,
@@ -276,8 +290,13 @@ def revise_interview_prep_endpoint(
 # evidence) to rebuild the same already-selected evidence bundle the profile was
 # grounded in. Shared by both verify endpoints (one-shot and streaming) so the
 # evidence rebuild stays identical. Raises the same domain errors the callers map.
-def _gather_verify_evidence(repo_url: str) -> RepoEvidenceCollection:
+def _gather_verify_evidence(
+    repo_url: str, user: AuthenticatedUser | None
+) -> RepoEvidenceCollection:
     parsed_repo = parse_github_repo_url(repo_url)
+    # Set the installation token in THIS call's thread (the streaming variant runs
+    # this on a worker thread), so the fetches below can reach a private repo.
+    repo_access.apply_repo_access(user, parsed_repo.owner, parsed_repo.repo)
     metadata = fetch_repo_metadata(parsed_repo.owner, parsed_repo.repo)
     tree = fetch_repo_tree(
         parsed_repo.owner,
@@ -313,9 +332,12 @@ def _record_claim_metrics(verifications: list) -> None:
 # live in claim_verifier. This is the one-shot variant (the whole result at once);
 # /verify/stream below runs the same work but streams real progress as it goes.
 @router.post("/verify", response_model=VerifyClaimsResponse)
-def verify_claims_endpoint(request: VerifyClaimsRequest) -> VerifyClaimsResponse:
+def verify_claims_endpoint(
+    request: VerifyClaimsRequest,
+    user: AuthenticatedUser | None = Depends(require_user_when_configured),
+) -> VerifyClaimsResponse:
     try:
-        evidence = _gather_verify_evidence(request.repo_url)
+        evidence = _gather_verify_evidence(request.repo_url, user)
         with metrics_store.timed("llm"):
             verifications, estimated_input_tokens, usage = verify_claims(
                 evidence, request.outputs, request.user_context, request.sections
@@ -359,6 +381,7 @@ def verify_claims_endpoint(request: VerifyClaimsRequest) -> VerifyClaimsResponse
 @router.post("/verify/stream")
 async def verify_claims_stream_endpoint(
     request: VerifyClaimsRequest,
+    user: AuthenticatedUser | None = Depends(require_user_when_configured),
 ) -> StreamingResponse:
     event_queue: queue.Queue = queue.Queue()
 
@@ -370,7 +393,7 @@ async def verify_claims_stream_endpoint(
             # The evidence rebuild is the first real stage; signal it before the
             # (blocking) GitHub work so the checklist lights up immediately.
             emit({"type": "progress", "stage": VERIFY_STAGE_EVIDENCE, "detail": None})
-            evidence = _gather_verify_evidence(request.repo_url)
+            evidence = _gather_verify_evidence(request.repo_url, user)
 
             def on_progress(stage: str, detail: str | None) -> None:
                 emit({"type": "progress", "stage": stage, "detail": detail})

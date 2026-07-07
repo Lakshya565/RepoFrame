@@ -2,6 +2,7 @@ import os
 import base64
 import time
 from collections.abc import Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +27,25 @@ COMMIT_STATS_RETRY_DELAY_SECONDS = 1.2
 BACKEND_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 load_dotenv(BACKEND_ENV_FILE)
+
+# Per-request GitHub App installation token (Phase 15.5). Default None → the public
+# flow (backend PAT or unauthenticated). An analyze route sets this for a signed-in
+# user whose installation grants the repo, so the fetchers below authenticate as
+# that installation and can read private repos. It's a ContextVar, so each request
+# runs against its own value and a token never leaks between requests.
+_installation_token: ContextVar[str | None] = ContextVar(
+    "installation_token", default=None
+)
+
+
+def set_installation_token(token: str | None) -> None:
+    """Set (or clear, with None) the installation token for the current request.
+
+    Called at the top of an analyze route AFTER resolving whether the signed-in
+    user's App installation grants this repo. Always call it (with None for the
+    public path) so a value can never carry over within a reused context.
+    """
+    _installation_token.set(token)
 
 
 # Carries a user-facing GitHub metadata error and matching HTTP status so
@@ -531,9 +551,13 @@ def _build_headers() -> dict[str, str]:
         "X-GitHub-Api-Version": "2022-11-28",
     }
 
-    github_token = os.environ.get(GITHUB_TOKEN_ENV)
-    if github_token:
-        headers["Authorization"] = f"Bearer {github_token}"
+    # Phase 15.5: a per-request GitHub App installation token (set by the analyze
+    # routes for a signed-in user with the App installed) takes precedence and
+    # grants private-repo access. Falling back to the backend PAT keeps the public
+    # flow byte-for-byte unchanged when no installation token is set.
+    token = _installation_token.get() or os.environ.get(GITHUB_TOKEN_ENV)
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
 
     return headers
 

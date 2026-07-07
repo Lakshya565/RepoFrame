@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { ExternalLink } from "lucide-react";
 
 import {
@@ -8,6 +9,7 @@ import {
   type RepoMetadataResponse,
 } from "@/lib/repo-api";
 import { useRepoResource, type RepoResource } from "@/lib/use-repo-resource";
+import { useGeneration } from "@/lib/generation-context";
 import { useTechStack } from "@/lib/tech-stack-context";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -34,6 +36,16 @@ const METADATA_ERROR = "RepoFrame could not fetch repository metadata.";
 export function RepoOverviewCard({ repoUrl }: RepoOverviewCardProps) {
   const metadata = useRepoResource(repoUrl, fetchRepoMetadata, METADATA_ERROR);
   const techStack = useTechStack();
+
+  // Lift the loaded metadata into the shared generation state so the auto-save
+  // (which runs in the analysis layout, across tabs) has the repo facts a saved
+  // snapshot needs. Inert unless the saved-projects feature is enabled + signed in.
+  const { setRepoMetadata } = useGeneration();
+  useEffect(() => {
+    if (metadata.data) {
+      setRepoMetadata(metadata.data);
+    }
+  }, [metadata.data, setRepoMetadata]);
 
   return (
     <Card beam className="p-6">

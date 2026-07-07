@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.schemas.repo import (
     CommitActivityRequest,
@@ -36,13 +36,23 @@ from app.services.github_service import (
     fetch_repo_metadata,
     fetch_repo_tree,
 )
+from app.services import repo_access
+from app.services.auth import AuthenticatedUser, require_user_when_configured
 from app.services.repo_parser import RepoUrlParseError, parse_github_repo_url
 from app.services.tech_stack_detector import (
     collect_stack_evidence,
     detect_tech_stack,
 )
 
-router = APIRouter(prefix="/api/repo", tags=["repo"])
+# Login gate (Phase 15.3): when Supabase is configured, the repo-analysis
+# endpoints require a verified user; when unconfigured (local dev), they stay open.
+# Applied at the router level so the gate can't be forgotten on a new route.
+# Signed-out visitors never reach these — they render the static demo fixture.
+router = APIRouter(
+    prefix="/api/repo",
+    tags=["repo"],
+    dependencies=[Depends(require_user_when_configured)],
+)
 
 
 # Returns normalized owner/repo data for a GitHub URL before analysis starts.
@@ -64,9 +74,13 @@ def parse_repo(request: RepoParseRequest) -> RepoParseResponse:
 # Parses the URL, fetches GitHub repo metadata, and shapes it for the frontend.
 # Route logic is limited to service orchestration and HTTP error translation.
 @router.post("/metadata", response_model=RepoMetadataResponse)
-def get_repo_metadata(request: RepoParseRequest) -> RepoMetadataResponse:
+def get_repo_metadata(
+    request: RepoParseRequest,
+    user: AuthenticatedUser | None = Depends(require_user_when_configured),
+) -> RepoMetadataResponse:
     try:
         parsed_repo = parse_github_repo_url(request.repo_url)
+        repo_access.apply_repo_access(user, parsed_repo.owner, parsed_repo.repo)
         metadata = fetch_repo_metadata(parsed_repo.owner, parsed_repo.repo)
     except RepoUrlParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -98,10 +112,12 @@ def get_repo_metadata(request: RepoParseRequest) -> RepoMetadataResponse:
 @router.post("/commit-activity", response_model=CommitActivityResponse)
 def get_repo_commit_activity(
     request: CommitActivityRequest,
+    user: AuthenticatedUser | None = Depends(require_user_when_configured),
 ) -> CommitActivityResponse:
     contributors_truncated = False
     try:
         parsed_repo = parse_github_repo_url(request.repo_url)
+        repo_access.apply_repo_access(user, parsed_repo.owner, parsed_repo.repo)
         if request.range == "all":
             weeks, contributors_truncated = fetch_contributor_weeks(
                 parsed_repo.owner, parsed_repo.repo
@@ -143,9 +159,13 @@ def get_repo_commit_activity(
 # Fetches the default-branch file tree after resolving repo metadata. The
 # metadata call supplies the branch name that GitHub's tree endpoint requires.
 @router.post("/tree", response_model=RepoTreeResponse)
-def get_repo_tree(request: RepoParseRequest) -> RepoTreeResponse:
+def get_repo_tree(
+    request: RepoParseRequest,
+    user: AuthenticatedUser | None = Depends(require_user_when_configured),
+) -> RepoTreeResponse:
     try:
         parsed_repo = parse_github_repo_url(request.repo_url)
+        repo_access.apply_repo_access(user, parsed_repo.owner, parsed_repo.repo)
         metadata = fetch_repo_metadata(parsed_repo.owner, parsed_repo.repo)
         tree = fetch_repo_tree(
             parsed_repo.owner,
@@ -183,9 +203,13 @@ def get_repo_tree(request: RepoParseRequest) -> RepoTreeResponse:
 # selections. The route only orchestrates services and leaves scoring rules in
 # file_ranker.py so future phases can reuse the same ranking behavior.
 @router.post("/ranked-files", response_model=RepoFileRankingResponse)
-def get_ranked_repo_files(request: RepoParseRequest) -> RepoFileRankingResponse:
+def get_ranked_repo_files(
+    request: RepoParseRequest,
+    user: AuthenticatedUser | None = Depends(require_user_when_configured),
+) -> RepoFileRankingResponse:
     try:
         parsed_repo = parse_github_repo_url(request.repo_url)
+        repo_access.apply_repo_access(user, parsed_repo.owner, parsed_repo.repo)
         metadata = fetch_repo_metadata(parsed_repo.owner, parsed_repo.repo)
         tree = fetch_repo_tree(
             parsed_repo.owner,
@@ -226,9 +250,13 @@ def get_ranked_repo_files(request: RepoParseRequest) -> RepoFileRankingResponse:
 # ranked README and manifest/config files; broad source-content fetching belongs
 # to the bounded evidence pipeline in Phase 7.
 @router.post("/tech-stack", response_model=TechStackResponse)
-def get_repo_tech_stack(request: RepoParseRequest) -> TechStackResponse:
+def get_repo_tech_stack(
+    request: RepoParseRequest,
+    user: AuthenticatedUser | None = Depends(require_user_when_configured),
+) -> TechStackResponse:
     try:
         parsed_repo = parse_github_repo_url(request.repo_url)
+        repo_access.apply_repo_access(user, parsed_repo.owner, parsed_repo.repo)
         metadata = fetch_repo_metadata(parsed_repo.owner, parsed_repo.repo)
         tree = fetch_repo_tree(
             parsed_repo.owner,
@@ -288,9 +316,13 @@ def get_repo_tech_stack(request: RepoParseRequest) -> TechStackResponse:
 # errors; all selection and limit logic lives in file_content_service so future
 # phases can reuse the same safe evidence bundle.
 @router.post("/file-contents", response_model=RepoFileContentResponse)
-def get_repo_file_contents(request: RepoParseRequest) -> RepoFileContentResponse:
+def get_repo_file_contents(
+    request: RepoParseRequest,
+    user: AuthenticatedUser | None = Depends(require_user_when_configured),
+) -> RepoFileContentResponse:
     try:
         parsed_repo = parse_github_repo_url(request.repo_url)
+        repo_access.apply_repo_access(user, parsed_repo.owner, parsed_repo.repo)
         metadata = fetch_repo_metadata(parsed_repo.owner, parsed_repo.repo)
         tree = fetch_repo_tree(
             parsed_repo.owner,

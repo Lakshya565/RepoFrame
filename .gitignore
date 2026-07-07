@@ -70,6 +70,11 @@ web_modules/
 .env.*
 !.env.example
 
+# Private keys / certs (e.g. the GitHub App .pem). Keep the .pem outside the repo
+# anyway; this is a backstop so one accidentally copied in can never be committed.
+*.pem
+*.key
+
 # Python
 __pycache__/
 *.py[cod]

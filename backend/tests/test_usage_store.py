@@ -1,8 +1,9 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from app.services import usage_store
+from app.services import supabase_client, usage_store
 from app.services.llm_client import EMPTY_USAGE, TokenUsage
 
 
@@ -14,8 +15,15 @@ class UsageStoreTests(unittest.TestCase):
         self._dir = tempfile.TemporaryDirectory()
         # A nested path so the store also has to create the parent directory.
         self.path = Path(self._dir.name) / "nested" / "usage.json"
+        # These tests cover the JSON fallback specifically, so force the
+        # unconfigured path (the test env may have Supabase env set).
+        self._unconfigured = patch.object(
+            supabase_client, "is_configured", return_value=False
+        )
+        self._unconfigured.start()
 
     def tearDown(self) -> None:
+        self._unconfigured.stop()
         self._dir.cleanup()
 
     def test_missing_file_reads_as_zero(self) -> None:
@@ -54,5 +62,58 @@ class UsageStoreTests(unittest.TestCase):
         self.assertEqual(usage_store.get_total(self.path).total_tokens, 0)
 
 
+# A minimal fake Supabase client: insert() appends a row, select().execute()
+# returns all rows — enough to exercise _supabase_record / _supabase_total offline.
+class _FakeTable:
+    def __init__(self, rows: list) -> None:
+        self._rows = rows
+        self._selecting = False
+
+    def insert(self, row: dict) -> "_FakeTable":
+        self._rows.append(row)
+        return self
+
+    def select(self, _columns: str) -> "_FakeTable":
+        self._selecting = True
+        return self
+
+    def execute(self):
+        class _Result:
+            pass
+
+        result = _Result()
+        result.data = list(self._rows) if self._selecting else None
+        return result
+
+
+class _FakeClient:
+    def __init__(self) -> None:
+        self.rows: list = []
+
+    def table(self, _name: str) -> _FakeTable:
+        return _FakeTable(self.rows)
+
+
+# The Supabase-backed path (Phase 15.7), fully offline via the fake client.
+class SupabaseUsageStoreTests(unittest.TestCase):
+    def test_record_then_total_via_supabase(self) -> None:
+        fake = _FakeClient()
+        with patch.object(supabase_client, "is_configured", return_value=True), patch.object(
+            supabase_client, "get_client", return_value=fake
+        ):
+            usage_store.record(TokenUsage(10, 20, 5, 30))
+            usage_store.record(TokenUsage(1, 2, 0, 3))
+            # A zero-usage run is still skipped on the Supabase path.
+            usage_store.record(EMPTY_USAGE)
+            total = usage_store.get_total()
+
+        self.assertEqual(total.prompt_tokens, 11)
+        self.assertEqual(total.total_tokens, 33)
+        self.assertEqual(total.runs, 2)
+        # Only the two non-empty runs were inserted.
+        self.assertEqual(len(fake.rows), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
+

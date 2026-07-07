@@ -1,3 +1,4 @@
+import { getAccessToken } from "@/lib/supabase";
 import type { UserContext } from "@/lib/user-context";
 
 export type ParsedRepoResponse = {
@@ -84,6 +85,16 @@ type ApiErrorResponse = {
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+
+// Authorization header for backend calls that are login-gated when Supabase is
+// configured (analyze / generate / verify). Returns the signed-in user's Supabase
+// access token as a Bearer, or {} when signed out / unconfigured — so the public
+// dev flow sends no header and is unchanged. The backend decides whether the
+// header is required (require_user_when_configured).
+async function authHeaders(): Promise<Record<string, string>> {
+  const token = await getAccessToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 // Sends raw repo input to the backend parser and returns the normalized identity
 // that downstream UI uses for display and routing.
@@ -427,6 +438,7 @@ export async function verifyClaimsStream(
     headers: {
       "Content-Type": "application/json",
       Accept: "text/event-stream",
+      ...(await authHeaders()),
     },
     body: JSON.stringify({ repoUrl, userContext, outputs }),
     signal: handlers.signal,
@@ -560,6 +572,7 @@ async function postJson<T>(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...(await authHeaders()),
     },
     body: JSON.stringify(body),
   });
@@ -578,6 +591,7 @@ async function postRepoRequest<T>(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...(await authHeaders()),
     },
     body: JSON.stringify({ repoUrl }),
   });

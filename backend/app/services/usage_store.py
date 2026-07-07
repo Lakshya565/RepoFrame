@@ -5,6 +5,7 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.services import supabase_client
 from app.services.llm_client import EMPTY_USAGE, TokenUsage
 
 # Persistent lifetime token ledger. This is a deliberately tiny stopgap: a single
@@ -92,9 +93,61 @@ def _write(path: Path, totals: LifetimeUsage) -> None:
     os.replace(temp_path, path)
 
 
-# Returns the lifetime totals for the usage endpoint. Read-only, so it does not
-# take the write lock.
+# ── Supabase-backed ledger (Phase 15.7) ─────────────────────────────────────
+# When Supabase is configured, the append-only usage_metrics table replaces the
+# JSON file (which does not survive multiple backend instances). record() inserts a
+# row; get_total() SUMs the columns and counts rows. The exact record()/get_total()
+# signatures and the LifetimeUsage return shape are unchanged, so routes and the
+# token panel don't change. This stays GLOBAL (no user_id) to match the JSON
+# ledger's "what this backend spent" semantics; per-user attribution is a later add.
+
+
+# SUM the token columns and count the rows for the lifetime total. Reads only the
+# four numeric columns (each row is one recorded run).
+def _supabase_total() -> LifetimeUsage:
+    client = supabase_client.get_client()
+    result = (
+        client.table("usage_metrics")
+        .select(
+            "prompt_tokens, completion_tokens, reasoning_tokens, total_tokens"
+        )
+        .execute()
+    )
+    rows = result.data or []
+
+    def column(key: str) -> int:
+        return sum(int(row.get(key) or 0) for row in rows)
+
+    return LifetimeUsage(
+        prompt_tokens=column("prompt_tokens"),
+        completion_tokens=column("completion_tokens"),
+        reasoning_tokens=column("reasoning_tokens"),
+        total_tokens=column("total_tokens"),
+        runs=len(rows),
+    )
+
+
+# Append one run's usage as a new row.
+def _supabase_record(usage: TokenUsage) -> None:
+    client = supabase_client.get_client()
+    client.table("usage_metrics").insert(
+        {
+            "prompt_tokens": usage.prompt_tokens,
+            "completion_tokens": usage.completion_tokens,
+            "reasoning_tokens": usage.reasoning_tokens,
+            "total_tokens": usage.total_tokens,
+        }
+    ).execute()
+
+
+# Returns the lifetime totals for the usage endpoint. Read-only. Uses Supabase when
+# configured, falling back to the JSON file (never breaks the usage endpoint).
 def get_total(path: Path = _DEFAULT_PATH) -> LifetimeUsage:
+    if supabase_client.is_configured():
+        try:
+            return _supabase_total()
+        except Exception as exc:  # noqa: BLE001 - a read failure must not 500 the endpoint
+            logger.warning("Supabase usage read failed; falling back to JSON: %s", exc)
     return _read(path)
 
 
@@ -121,6 +174,15 @@ def add(usage: TokenUsage, path: Path = _DEFAULT_PATH) -> LifetimeUsage:
 # failure is logged and swallowed rather than raised.
 def record(usage: TokenUsage, path: Path = _DEFAULT_PATH) -> None:
     if usage == EMPTY_USAGE:
+        return
+    # Prefer Supabase when configured; a failed ledger write must never discard an
+    # already-completed (already-paid-for) generation, so failures are logged and
+    # swallowed rather than raised.
+    if supabase_client.is_configured():
+        try:
+            _supabase_record(usage)
+        except Exception as exc:  # noqa: BLE001 - see above; never raise here
+            logger.warning("Could not record usage to Supabase: %s", exc)
         return
     try:
         add(usage, path)

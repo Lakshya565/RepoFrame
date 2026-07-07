@@ -20,6 +20,31 @@ A user signs in with GitHub, optionally installs the RepoFrame GitHub App on **a
 finds every analysis saved to a **History / Saved projects** view they can reopen — with
 no long-lived repo token ever held by RepoFrame.
 
+### Access model — login is the gate (decided 2026-07-05)
+
+RepoFrame is a tool for developers to showcase **their own** work, and every real user has a
+GitHub account by definition. So **live analysis and generation require a GitHub login**; this
+is the primary abuse control (an accountable identity + per-user quota, not spoofable IP limits).
+There are **two distinct signed-out states**, which must behave differently:
+
+- **Supabase unconfigured (local dev / self-host):** the full flow works with **no login** — the
+  developer experience is unchanged. This is the "graceful degradation" the plan already targets.
+- **Supabase configured (production) + user signed out:** the visitor sees a **static, hardcoded
+  demo** of one fixed public repo — a frozen analysis + frozen generated outputs shipped as a
+  fixture. The context form is **disabled** with a "log in to analyze your own repo" prompt. It
+  performs **no live analysis, no generation, no GitHub calls, and spends zero tokens.**
+
+Consequences threaded through the sub-phases below:
+- When Supabase **is configured**, the analyze / generate / verify endpoints **require a verified
+  user** (`require_user`). Signed-out clients never call them; they render the fixture instead.
+- We deliberately **do not** restrict analysis to owned/forked repos: forking is free (so it
+  stops nobody), public repos are already quota-capped, and private repos are already
+  access-locked by the GitHub App. Login + per-user quota + the global daily cap (Phase 16) are
+  the real controls.
+- The **demo repo** is the same for every visitor (it's hardcoded). *(Decided 2026-07-06:
+  `DEMO_REPO` = RepoFrame itself, github.com/Lakshya565/RepoFrame. The frozen fixture is
+  hand-authored in `frontend/src/lib/demo-fixture.ts` — zero GitHub/token cost to serve.)*
+
 ---
 
 ## 2. Architecture — two separate pieces (read this first)
@@ -45,12 +70,24 @@ makes this safe:
 
 | User wants | What happens |
 |---|---|
-| Only public repos | Don't install the App. Public repos are read without any token. |
-| All repos (incl. private) | Install the App → "All repositories". |
-| Select specific repos | Install the App → "Only select repositories" (native picker; editable anytime on GitHub). |
+| Only public repos | Log in (identity), don't install the App. Public repos are read without any repo token. |
+| All repos (incl. private) | Log in, then install the App → "All repositories". |
+| Select specific repos | Log in, then install the App → "Only select repositories" (native picker; editable anytime on GitHub). |
+
+*(Login is required for **all** live analysis in production — the "no App" row still needs a
+signed-in identity; it just needs no **repo** token. Signed-out visitors get the static demo.
+See §1 Access model.)*
 
 RepoFrame stores only the **installation_id** mapped to the user (not a secret), lists the
 repos that installation can access, and lets the user pick one to analyze.
+
+> **Forward-compat (Phase 17 — MCP server):** keep this identity/access split *portable*.
+> Identity must stay a **stateless Bearer JWT in the `Authorization` header** (as 15.1 already
+> does) — never a browser-cookie-only session — so a non-browser MCP client can present the
+> same token. Key **quotas and rate limits on `user_id`** (not on a web session), and keep the
+> installation-token minting reachable from any authenticated caller, not just the Next.js
+> routes. Do this and Phase 17 becomes a thin MCP adapter over these same services instead of
+> an auth refactor. See `PHASES.md` → *Phase 17*.
 
 ---
 
@@ -66,8 +103,14 @@ Create a project at supabase.com. Provide:
 |---|---|---|
 | Project URL | `SUPABASE_URL` (backend) + `NEXT_PUBLIC_SUPABASE_URL` (frontend) | No |
 | `anon` public key | `NEXT_PUBLIC_SUPABASE_ANON_KEY` (frontend) | No (public by design) |
-| `service_role` key | `SUPABASE_SERVICE_ROLE_KEY` (backend) | **Yes — backend only** |
-| JWT secret | `SUPABASE_JWT_SECRET` (backend) | **Yes — backend only** |
+| `service_role` (or `sb_secret_…`) key | `SUPABASE_SERVICE_ROLE_KEY` (backend) | **Yes — backend only** |
+| JWT secret *(legacy HS256 only)* | `SUPABASE_JWT_SECRET` (backend) | **Yes — backend only** |
+
+> **JWT verification (2026-07-06):** projects on Supabase's newer **asymmetric JWT signing
+> keys (ES256/RS256)** have **no** shared JWT secret — leave `SUPABASE_JWT_SECRET` blank and
+> 15.1 verifies tokens against the public JWKS derived from `SUPABASE_URL`. Only fill it in
+> if your project still uses a legacy shared HS256 secret. The values shown on the Supabase
+> "JWT Keys" screen (Key ID, Discovery URL, public key set) are **not** secrets.
 
 Then run the SQL migration (§5) in the Supabase SQL editor.
 
@@ -128,8 +171,11 @@ Provide these to the backend env:
 - **Secret boundary:** only `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY`
   are public. Service-role key, JWT secret, App private key, webhook secret are backend-only
   (same rule the OpenAI key already follows).
-- **Graceful signed-out / unconfigured:** public-repo analysis keeps working with no login
-  and no Supabase (§ sub-phase acceptance).
+- **Graceful signed-out / unconfigured (see §1 Access model):** with **Supabase unconfigured**
+  (local dev / self-host) the full public-repo flow works with no login, exactly as today. With
+  **Supabase configured** (production) a signed-out visitor gets only the **static hardcoded
+  demo** — zero live analysis, zero generation, zero GitHub/token spend — and the analyze /
+  generate / verify endpoints require a verified user.
 
 ---
 
@@ -212,14 +258,28 @@ Done when.**
 ### 15.1 — Backend auth (verify Supabase JWT)
 - **Depends on:** 15.0 + §3B (GitHub OAuth App wired into Supabase).
 - **You provide:** enable GitHub provider in Supabase with the OAuth App client id/secret.
-- **Backend:** `services/auth.py` → `get_current_user(authorization)` (verify HS256 with
-  `SUPABASE_JWT_SECRET`; return `user_id` + GitHub id; `None` if absent/invalid) and
-  `require_user(...)` (401 if absent). A FastAPI dependency.
+- **Token verification model (decided 2026-07-06):** the target project uses Supabase's
+  **asymmetric JWT signing keys (ES256)** — there is **no HS256 shared secret**. So
+  `get_current_user` verifies tokens against the project's **public JWKS**, fetched from the
+  discovery URL derived from `SUPABASE_URL`
+  (`<SUPABASE_URL>/auth/v1/.well-known/jwks.json`), using `pyjwt`'s `PyJWKClient` (already a
+  transitive dep via `supabase`). The JWKS client caches keys and refreshes on key rotation,
+  so nothing key-specific is stored in env. **Legacy fallback:** if `SUPABASE_JWT_SECRET` is
+  set (a project still on a shared HS256 secret), verify HS256 with it instead — the code
+  picks the path by whether the secret is present. Always pin the expected algorithm(s) and
+  verify `aud` (`authenticated`) + `exp`; never accept `alg: none`.
+- **Backend:** `services/auth.py` → `get_current_user(authorization)` (verify via JWKS/ES256
+  by default, or HS256 if `SUPABASE_JWT_SECRET` is set; return `user_id` + GitHub id; `None`
+  if absent/invalid) and `require_user(...)` (401 if absent). A FastAPI dependency.
 - **Frontend:** none yet.
-- **Security:** never trust an unverified token; signed-out stays allowed for public flows.
-- **Tests:** crafted JWTs signed with a test secret — valid, expired, wrong-signature,
-  missing → correct outcomes. Offline.
-- **Done when:** auth dependency unit-tested green.
+- **Security:** never trust an unverified token; pin algorithms (reject `none`); verify
+  audience + expiry; signed-out stays allowed for public flows. The JWKS endpoint is public
+  by design — it holds only public keys, no secret.
+- **Tests:** crafted tokens verified against a throwaway key/JWKS the test controls — valid,
+  expired, wrong-signature/wrong-key, wrong-audience, `alg:none`, and missing → correct
+  outcomes. HS256-fallback path tested with a test secret. Fully offline (no real JWKS fetch).
+- **Done when:** auth dependency unit-tested green on both the JWKS (ES256) and legacy HS256
+  paths.
 
 ### 15.2 — Project storage (save/list/load/delete)
 - **Depends on:** 15.1
@@ -235,18 +295,32 @@ Done when.**
   round-trip (save→load equals input), cascade delete, unconfigured no-op. Offline.
 - **Done when:** storage tests green; manual Supabase smoke by you.
 
-### 15.3 — Frontend auth + save + history (public repos only)
+### 15.3 — Login gate + static demo + frontend auth/save/history (public repos)
 - **Depends on:** 15.2
-- **You provide:** `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
-- **Backend:** none.
-- **Frontend:** `@supabase/supabase-js` + `lib/supabase.ts`; header login/logout; attach
-  the Supabase JWT to API calls; debounced auto-save of the `GenerationProvider` snapshot
-  after each generation; `GenerationProvider.hydrate(snapshot)`; fill in the History tab;
-  add `/saved`; gate all of it behind `NEXT_PUBLIC_SHOW_SAVED`.
-- **Security:** JWT only sent to our backend; no secrets in the bundle.
-- **Tests:** `tsc --noEmit` + `eslint` clean; you preview.
-- **Done when:** a signed-in user can generate on a **public** repo, see it in History /
-  `/saved`, reopen, and delete.
+- **You provide:** `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY`; the **demo
+  repo** choice (the one fixed public repo the signed-out fixture shows).
+- **Backend:** apply the login gate — when Supabase **is configured**, the analyze / generate /
+  verify endpoints use `require_user` (401 for anonymous); when **unconfigured**, they stay open
+  (dev flow). Ship the **demo fixture** as a static, committed data file (frozen analysis +
+  frozen generated outputs for `DEMO_REPO`) served by a tiny read-only, unauthenticated endpoint
+  (or embedded straight into the frontend bundle — no backend call at all). It spends zero
+  tokens and makes no GitHub calls; it's precomputed once, by hand or a one-off script.
+- **Frontend:** `@supabase/supabase-js` + `lib/supabase.ts`; header login/logout; attach the
+  Supabase JWT to API calls; **when signed out (and Supabase configured), render the hardcoded
+  demo** — the frozen `DEMO_REPO` analysis + outputs, with the context form **disabled** behind
+  a "log in to analyze your own repo" prompt and every generate/verify trigger replaced by a
+  login CTA; debounced auto-save of the `GenerationProvider` snapshot after each generation;
+  `GenerationProvider.hydrate(snapshot)`; fill in the History tab; add `/saved`; gate the
+  saved/history surfaces behind `NEXT_PUBLIC_SHOW_SAVED`.
+- **Security:** JWT only sent to our backend; no secrets in the bundle; the demo fixture is
+  inert static data (no live fetch/generation path reachable while signed out).
+- **Tests:** backend — `require_user`-gated endpoints reject anonymous when configured and allow
+  it when unconfigured (crafted JWTs, offline); the demo endpoint/fixture returns the frozen
+  shape with no network. Frontend — `tsc --noEmit` + `eslint` clean; you preview.
+- **Done when:** signed out (Supabase configured) shows the frozen `DEMO_REPO` demo with a
+  disabled context form and login CTAs and spends nothing; a signed-in user can generate on a
+  **public** repo, see it in History / `/saved`, reopen, and delete; local dev (Supabase unset)
+  still works with no login.
 
 ### 15.4 — GitHub App foundation (app auth + installation mapping)
 - **Depends on:** 15.1 + §3C (GitHub App registered).
@@ -319,14 +393,18 @@ Done when.**
   (in-memory repos, fake HTTP client, crafted JWTs, throwaway keys). Manual integration
   checks (real Supabase + a real GitHub install) are documented but excluded from
   `python -m unittest`. Frontend is `tsc --noEmit` + `eslint` only — no dev server / browser.
-- **Graceful degradation:** with Supabase/App unconfigured or the user signed out, the
-  public-repo app behaves exactly as it does today.
+- **Graceful degradation (see §1 Access model):** with Supabase/App **unconfigured** (dev/
+  self-host), the public-repo app behaves exactly as it does today (no login). With Supabase
+  **configured** (production), a signed-out visitor gets the static hardcoded demo only; live
+  analyze / generate / verify require a verified user.
 - **Non-goals:** payments, teams, org permissions, sharing; non-GitHub providers; full
   per-generation version history (latest snapshot per repo only); rate-limit enforcement
   (Phase 16).
 - **Definition of done (phase):** sign in with GitHub → optionally install the App on all/
   selected repos → analyze public **or** private repos → analyses saved to History/`/saved`,
-  reopenable, deletable — with **no repo token stored**, strict per-user isolation, and the
-  signed-out public flow untouched. All static checks + offline backend suite green; docs +
-  comments current.
+  reopenable, deletable — with **no repo token stored** and strict per-user isolation. In
+  production (Supabase configured) a signed-out visitor sees the **static hardcoded demo** only
+  (zero token/GitHub spend) and every analyze / generate / verify endpoint requires a verified
+  user; with Supabase unconfigured the no-login dev flow is untouched. All static checks +
+  offline backend suite green; docs + comments current.
 ```

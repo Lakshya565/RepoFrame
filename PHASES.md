@@ -221,6 +221,18 @@ Add a simple utility to estimate input size before sending content to OpenAI. If
 Do not implement paid billing or full auth yet. The goal is to make the OpenAI integration safe enough for a controlled deployment.
 ```
 
+## Note (updated 2026-07-05): the real abuse gate is GitHub login
+
+The "optional password gate placeholder" above was a stopgap. The decided abuse model is:
+**live analysis and generation require a GitHub login** (Phase 15), because every genuine user
+is a developer with a GitHub account. Signed-out visitors (in production) get a **static,
+hardcoded demo** that spends zero tokens and makes zero GitHub calls. Login gives an accountable
+identity for **per-user quotas** (Phase 15) on top of the **global daily cap** (Phase 16,
+`MAX_ANALYSES_PER_DAY`) — together those are the abuse controls, not IP limits. Access is **not**
+restricted to owned/forked repos (forking is free, so it protects nothing; public repos are
+quota-capped and private repos are App-access-locked). The size/budget limits in this phase still
+apply per call. See `PHASE_15_PLAN.md` → §1 Access model.
+
 ---
 
 # Phase 9: User Context Questionnaire
@@ -590,6 +602,119 @@ Prepare RepoFrame for controlled deployment. Add production environment variable
 Add or document basic controlled-access protections such as request limits, optional password gate placeholder, and daily analysis cap. Do not expose OpenAI or GitHub tokens to the frontend. Do not deploy automatically.
 ```
 
+## Note (updated 2026-07-05): abuse model at deploy time
+
+By deployment the abuse model is concrete (not just the placeholder above): **GitHub login is
+required for all live analysis/generation** (Phase 15), signed-out visitors get a **static
+hardcoded demo** (zero token/GitHub spend), and spend is bounded by **per-user quotas** (Phase 15)
+plus the **global `MAX_ANALYSES_PER_DAY` cap** here. GitHub accounts are free, so login alone
+isn't a perfect Sybil defense — the per-user quota + global cap must stay on underneath it. See
+`PHASE_15_PLAN.md` → §1 Access model.
+
+## Note (nice later optimization): repo + commit-SHA analysis cache
+
+Deferred, low-priority performance win — build only after the deployed MVP is proven, and only
+if repeat traffic warrants it. The deterministic analysis (metadata, file tree, ranking, tech
+stack) depends solely on repo contents, so cache each result **keyed on `repo + default-branch
+head commit SHA`**. The SHA makes invalidation trivial: a new commit = new key = automatic
+refresh, no manual busting. Benefits: repeated analysis of the same/popular repo becomes
+instant, and it stretches the GitHub API rate limit. Pairs well with **conditional GitHub
+requests (ETag / `If-None-Match`)**, whose `304 Not Modified` responses don't count against the
+rate limit.
+
+Scope notes: this is a **global** cache (same for every user), so it is intentionally separate
+from Phase 15's per-user, RLS-scoped Supabase persistence (which already caches *results* per
+user on reopen). Keep it simple first — an in-memory/TTL store or a small standalone table, not
+tangled into the per-user tables. Do **not** silently cache LLM *generation* (users often want a
+fresh regen); if ever added, gate it on `SHA + context-hash` and surface it as "showing cached
+result." This does not block deployment — it's an optimization layered on top.
+
+---
+
+# Phase 17: RepoFrame as an MCP Server
+
+Only do this after the site is deployed (Phase 16) and accounts + quotas exist (Phase 15).
+
+> Turn RepoFrame into a **remote MCP server** so any agentic coding tool (Claude Code,
+> Cursor, etc.) can analyze a repo and get evidence-backed outputs inline, without a browser.
+> This is an **additive doorway over the existing services** — the deterministic pipeline,
+> the OpenAI generation, the agentic verifier, and the saved-project store don't change; MCP
+> is just a second adapter in front of them (routes stay thin, logic stays in services).
+>
+> **Decisions (2026-07-05):**
+> - **Full parity** — analysis, generation, claim verification, and saved-project load/save
+>   are all exposed as MCP tools, with all existing rate-limiting factors enforced on the MCP
+>   path too.
+> - **Access mirrors the web app** — anonymous callers get **public repos only** (exactly
+>   like the signed-out web flow today); authenticated callers get **private repos + saved
+>   projects**. Identity + private-repo access reuse Phase 15 as-is (Supabase Auth identity
+>   Bearer JWT; GitHub App ephemeral installation tokens, none stored).
+> - **One budget across web + MCP** — token spend reuses the **Phase 15 per-user quotas**;
+>   an MCP call and a web call draw from the same per-user budget. Requires Phase 15's auth to
+>   stay a portable Bearer token and its quotas keyed on `user_id` (noted in `PHASE_15_PLAN.md`).
+
+## Goal
+
+Any agentic coding tool can point at the deployed RepoFrame, authenticate as the same user
+it would in the browser, and call tools to analyze a repo, generate evidence-backed writeups,
+verify claims, and reopen saved projects — with the same access rules, the same per-user
+quotas, and no new secrets or logic duplicated.
+
+## Build
+
+```text
+Remote MCP server (Streamable HTTP transport) mounted on the deployed FastAPI app
+  (not stdio — it must be reachable over the network by remote agentic clients)
+MCP tools as thin adapters over existing services (NO logic duplication):
+  - analyze_repo          (deterministic: metadata, tech stack, file tree, ranked evidence)
+  - generate_outputs      (OpenAI-backed: resume bullets, README intro, blurb, LinkedIn desc)
+  - verify_claims         (the existing bounded agentic verifier)
+  - list/load/save projects (the Phase 15 saved-project store)
+Access mirrors the web app:
+  - anonymous  -> public repos only (signed-out flow, unchanged)
+  - authenticated -> private repos + saved projects (Phase 15 identity + GitHub App token)
+MCP OAuth authorization so a remote client can sign in to the SAME Supabase identity,
+  yielding the same Bearer JWT the web app already uses
+Rate limiting / spend guard: reuse Phase 15 per-user quotas keyed on user_id, PLUS the
+  existing prompt-budget gate, agent iteration/tool caps, and daily analysis cap — all
+  enforced on the MCP path, so one budget covers web + MCP
+Ephemeral GitHub App installation tokens for private repos (minted per call, never stored),
+  reached through the same github_service path the web pipeline uses
+Tool schemas + human-readable descriptions so any agentic tool can discover and call them
+```
+
+## Codex Prompt
+
+```text
+Expose RepoFrame as a remote MCP server, additively, on the already-deployed FastAPI backend.
+Do NOT duplicate any analysis, generation, verification, or storage logic — the MCP tools are
+thin adapters that call the exact same services the web routes already call.
+
+Mount an MCP server using the Streamable HTTP transport on the existing app (a /mcp router),
+not stdio, so remote agentic clients can reach it. Expose these tools, each mapping to an
+existing service: analyze_repo (deterministic pipeline: metadata, tech stack, file tree,
+ranked evidence), generate_outputs (the OpenAI-backed outputs), verify_claims (the bounded
+agentic verifier), and list/load/save saved projects (the Phase 15 store). Give every tool a
+clear schema and description for discovery.
+
+Access must mirror the web app exactly: an anonymous MCP caller can analyze PUBLIC repos only,
+identical to today's signed-out flow; an authenticated caller gets private repos and saved
+projects. Reuse Phase 15 for identity and repo access verbatim — verify the same Supabase
+Bearer JWT (add MCP OAuth so a client can obtain it), scope everything by the JWT-verified
+user_id, and for private repos mint an ephemeral GitHub App installation token per call
+(never stored) through the same github_service path.
+
+Enforce all rate-limiting factors on the MCP path, reusing Phase 15's per-user quotas keyed on
+user_id so a web call and an MCP call draw from the SAME budget, plus the existing prompt-budget
+gate, agentic iteration/tool caps, and daily analysis cap. Token-spending tools must respect
+these before calling OpenAI.
+
+Keep the web app behavior byte-for-byte unchanged. Keep all secrets backend-only. Keep every
+test offline and zero-token: fake the MCP client transport, fake repos/HTTP, crafted JWTs — a
+tool call routes to the same service and returns the same shape as the equivalent web route,
+anonymous is restricted to public repos, and an over-quota user is rejected before any spend.
+```
+
 ---
 
 # Updated Recommended Build Order
@@ -611,6 +736,7 @@ Add or document basic controlled-access protections such as request limits, opti
 14. UI polish
 15. Supabase save/load
 16. Deployment
+17. MCP server (remote, full parity, web-mirrored access, shared per-user quotas)
 ```
 
 # Codex Usage Rule

@@ -1,10 +1,13 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Loader2 } from "lucide-react";
+import { ArrowRight, Loader2, LogIn } from "lucide-react";
 
 import { parseRepoUrl } from "@/lib/repo-api";
+import { useAuth } from "@/lib/auth-context";
+import { isDemoActive } from "@/lib/demo-fixture";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { GlowText } from "@/components/glow-text";
@@ -14,6 +17,7 @@ import { GlowText } from "@/components/glow-text";
 // parsing stay on the backend; this component only manages input + request state.
 export function RepoUrlForm() {
   const router = useRouter();
+  const { status, configured, signInWithGitHub } = useAuth();
   const [repoUrl, setRepoUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -46,6 +50,41 @@ export function RepoUrlForm() {
       );
       setIsSubmitting(false);
     }
+  }
+
+  // Signed-out + Supabase configured (production): analysis is login-gated, so
+  // replace the input with a login prompt and a link to the frozen demo instead of
+  // letting the user submit into a guaranteed 401. In local dev (unconfigured →
+  // "disabled") and for signed-in users, the normal form renders.
+  if (isDemoActive(status, configured)) {
+    return (
+      <div className="w-full">
+        <p className="text-sm font-medium text-foreground">
+          <GlowText text="Log in to analyze your own repository" />
+        </p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          <GlowText text="RepoFrame analyzes your GitHub repositories, so it needs you signed in. No account? Take a look at the demo first." />
+        </p>
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+          <Button
+            type="button"
+            variant="brand"
+            className="h-11 px-5 sm:w-auto"
+            onClick={() => void signInWithGitHub()}
+          >
+            <LogIn />
+            Log in with GitHub
+          </Button>
+          <Link
+            href="/demo"
+            className="inline-flex h-11 items-center justify-center rounded-md px-5 text-sm font-medium text-muted-foreground transition-colors hover:text-brand"
+          >
+            View the demo
+            <ArrowRight className="ml-1 size-4" />
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   return (

@@ -15,8 +15,10 @@ import {
   type InterviewTopic,
   type OutputSection,
   type ProjectProfileData,
+  type RepoMetadataResponse,
   type UsageTotals,
 } from "@/lib/repo-api";
+import { type ProjectDetail } from "@/lib/projects-api";
 import { EMPTY_OUTPUTS } from "@/lib/outputs";
 import { EMPTY_USER_CONTEXT, type UserContext } from "@/lib/user-context";
 
@@ -103,6 +105,16 @@ type GenerationContextValue = {
   usageRefresh: number;
   addUsage: (usage: UsageTotals) => void;
   refreshLifetime: () => void;
+  // The repo metadata for the analysis in progress (Phase 15). Set by the Analysis
+  // page once its fetch resolves, and lifted here so the auto-save (which runs in
+  // the shared layout, across tabs) has the metadata a saved snapshot needs.
+  repoMetadata: RepoMetadataResponse | null;
+  setRepoMetadata: Dispatch<SetStateAction<RepoMetadataResponse | null>>;
+  // Loads a saved project snapshot into the workspace (reopen-from-History and the
+  // signed-out demo both use this). Replaces the questionnaire, profile, outputs,
+  // interview prep, and verifications in one shot and marks the guesses as seeded
+  // so the seed effect doesn't overwrite the restored context.
+  hydrate: (snapshot: ProjectDetail) => void;
 };
 
 const GenerationContext = createContext<GenerationContextValue | null>(null);
@@ -131,6 +143,27 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
   const [sessionUsage, setSessionUsage] =
     useState<UsageTotals>(EMPTY_USAGE_TOTALS);
   const [usageRefresh, setUsageRefresh] = useState(0);
+
+  const [repoMetadata, setRepoMetadata] =
+    useState<RepoMetadataResponse | null>(null);
+
+  // Restore a saved snapshot into every piece of workspace state. Baselines reset
+  // to empty (the restored drafts are treated as unedited), and busyTask/error
+  // clear so a reopened project lands in a clean, idle state.
+  function hydrate(snapshot: ProjectDetail) {
+    setContext(snapshot.userContext);
+    setProfile(snapshot.profile);
+    setProfileContext(snapshot.userContext);
+    setOutputs(snapshot.outputs);
+    setInterviewTopics(snapshot.interviewTopics);
+    setVerifications(snapshot.verifications);
+    setBaselines({});
+    setAllGuidance(snapshot.allGuidance);
+    setGuessesSeeded(true);
+    setRepoMetadata(snapshot.metadata);
+    setBusyTask(null);
+    setError(null);
+  }
 
   // Built fresh each render: the provider only re-renders when its own state
   // changes, which is exactly when consumers should see new values.
@@ -161,6 +194,9 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
     usageRefresh,
     addUsage: (usage) => setSessionUsage((prev) => addTotals(prev, usage)),
     refreshLifetime: () => setUsageRefresh((count) => count + 1),
+    repoMetadata,
+    setRepoMetadata,
+    hydrate,
   };
 
   return (

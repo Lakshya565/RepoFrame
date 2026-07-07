@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { IBM_Plex_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
+import { AuthProvider } from "@/lib/auth-context";
 import { MetricsDrawer } from "@/components/metrics/metrics-drawer";
 import { ScrollProgress } from "@/components/ui/scroll-progress";
 
@@ -50,7 +51,8 @@ export default function RootLayout({
         >
           {/* Thin green rail pinned to the top of every page, tracking scroll. */}
           <ScrollProgress />
-          {children}
+          {/* Auth state (Supabase) available app-wide; inert when unconfigured. */}
+          <AuthProvider>{children}</AuthProvider>
           <MetricsDrawer />
         </ThemeProvider>
       </body>

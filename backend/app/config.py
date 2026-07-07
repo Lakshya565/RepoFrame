@@ -1,4 +1,17 @@
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load backend/.env into the process environment before any os.getenv() below
+# runs. github_service.py also calls load_dotenv, but relying on that meant config
+# values only resolved correctly when github_service happened to be imported first
+# — an import-order trap. Loading here (config is the single source of truth for
+# settings) makes every constant deterministic regardless of import order.
+# load_dotenv does NOT override variables already set in the real environment, so a
+# shell/deployment env still wins over the .env file.
+_BACKEND_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
+load_dotenv(_BACKEND_ENV_FILE)
 
 # ============================================================
 # File Evidence Limits
@@ -121,3 +134,52 @@ MAX_ANALYSES_PER_DAY_GLOBAL: int = int(os.getenv("MAX_ANALYSES_PER_DAY", "500"))
 # session-token check. Never treat this as production-grade security.
 
 ACCESS_PASSWORD: str = os.getenv("ACCESS_PASSWORD", "")
+
+
+# ============================================================
+# Supabase (Phase 15 — persistence + auth)
+# ============================================================
+# Connection + secrets for the Supabase project that backs saved projects, the
+# usage ledger, and (from 15.1) JWT-based auth. All three are BACKEND-ONLY and are
+# read from the environment with NO fallback: an empty string means "not
+# configured", and the app must behave exactly as it does today (no login, public
+# repos only) rather than half-initialize. Never log these, never return them in a
+# response body, and never expose them to the frontend — only the two
+# NEXT_PUBLIC_SUPABASE_* values (URL + anon key) are public, and those live in the
+# frontend env, not here.
+#
+# - SUPABASE_URL: the project URL (e.g. https://<ref>.supabase.co).
+# - SUPABASE_SERVICE_ROLE_KEY: the service-role key. It BYPASSES Row Level
+#   Security, so it is the crown jewel here — every DB access made with it must be
+#   scoped by the JWT-verified user_id in code (RLS is only the defense-in-depth
+#   backstop). Backend only.
+# - SUPABASE_JWT_SECRET: OPTIONAL, legacy. Only relevant to projects that still
+#   sign tokens with a shared HS256 secret. Projects on Supabase's newer
+#   asymmetric JWT signing keys (ES256/RS256) have NO such secret — 15.1 verifies
+#   those against the public JWKS derived from SUPABASE_URL, so this stays blank.
+#   Declared here so the full Supabase config lives in one place; unused until 15.1.
+
+SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+SUPABASE_JWT_SECRET: str = os.getenv("SUPABASE_JWT_SECRET", "")
+
+
+# ============================================================
+# GitHub App (Phase 15.4 — fine-grained repo access)
+# ============================================================
+# Identity for the RepoFrame GitHub App, used to mint short-lived per-installation
+# tokens for reading a user's (public or private) repos. ALL backend-only. The
+# private key is the crown jewel — it signs the app JWTs and must never be logged
+# or sent to the frontend. Two ways to supply it, checked in this order by
+# github_app.py: GITHUB_APP_PRIVATE_KEY (the PEM contents inline) or
+# GITHUB_APP_PRIVATE_KEY_PATH (a path to the .pem, easier on Windows). No fallback:
+# empty means "GitHub App not configured" and private-repo access is simply off.
+#
+# On Windows use FORWARD SLASHES (or escape backslashes) in the PATH — dotenv
+# interprets backslash escapes inside double-quoted values.
+
+GITHUB_APP_ID: str = os.getenv("GITHUB_APP_ID", "")
+GITHUB_APP_SLUG: str = os.getenv("GITHUB_APP_SLUG", "")
+GITHUB_APP_PRIVATE_KEY: str = os.getenv("GITHUB_APP_PRIVATE_KEY", "")
+GITHUB_APP_PRIVATE_KEY_PATH: str = os.getenv("GITHUB_APP_PRIVATE_KEY_PATH", "")
+GITHUB_APP_WEBHOOK_SECRET: str = os.getenv("GITHUB_APP_WEBHOOK_SECRET", "")
