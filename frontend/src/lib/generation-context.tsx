@@ -20,6 +20,7 @@ import {
 } from "@/lib/repo-api";
 import { type ProjectDetail } from "@/lib/projects-api";
 import { EMPTY_OUTPUTS } from "@/lib/outputs";
+import { snapshotSignature } from "@/lib/project-snapshot";
 import { EMPTY_USER_CONTEXT, type UserContext } from "@/lib/user-context";
 
 // Phase 14: the analysis page became real route segments (Analysis / Generate /
@@ -115,6 +116,12 @@ type GenerationContextValue = {
   // interview prep, and verifications in one shot and marks the guesses as seeded
   // so the seed effect doesn't overwrite the restored context.
   hydrate: (snapshot: ProjectDetail) => void;
+  // Signature of the content last persisted to (or hydrated from) the saved-projects
+  // store, or null when nothing is saved yet. The auto-save reads this to skip a
+  // redundant write when the workspace still matches what's stored — notably right
+  // after a reopen — and updates it after each successful save. See project-snapshot.ts.
+  persistedSignature: string | null;
+  setPersistedSignature: Dispatch<SetStateAction<string | null>>;
 };
 
 const GenerationContext = createContext<GenerationContextValue | null>(null);
@@ -146,10 +153,15 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
 
   const [repoMetadata, setRepoMetadata] =
     useState<RepoMetadataResponse | null>(null);
+  const [persistedSignature, setPersistedSignature] = useState<string | null>(
+    null,
+  );
 
   // Restore a saved snapshot into every piece of workspace state. Baselines reset
   // to empty (the restored drafts are treated as unedited), and busyTask/error
-  // clear so a reopened project lands in a clean, idle state.
+  // clear so a reopened project lands in a clean, idle state. The restored content's
+  // signature is recorded as "already persisted" so the auto-save doesn't
+  // immediately re-write the just-reopened snapshot (Phase 16.0).
   function hydrate(snapshot: ProjectDetail) {
     setContext(snapshot.userContext);
     setProfile(snapshot.profile);
@@ -163,6 +175,16 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
     setRepoMetadata(snapshot.metadata);
     setBusyTask(null);
     setError(null);
+    setPersistedSignature(
+      snapshotSignature({
+        context: snapshot.userContext,
+        profile: snapshot.profile,
+        outputs: snapshot.outputs,
+        interviewTopics: snapshot.interviewTopics,
+        verifications: snapshot.verifications,
+        allGuidance: snapshot.allGuidance,
+      }),
+    );
   }
 
   // Built fresh each render: the provider only re-renders when its own state
@@ -197,6 +219,8 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
     repoMetadata,
     setRepoMetadata,
     hydrate,
+    persistedSignature,
+    setPersistedSignature,
   };
 
   return (

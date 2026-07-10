@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import { useAuth } from "@/lib/auth-context";
 import { useGeneration } from "@/lib/generation-context";
+import { snapshotSignature } from "@/lib/project-snapshot";
 import { saveProject, type SaveProjectRequest } from "@/lib/projects-api";
 
 // Best-effort auto-save of the current analysis snapshot to the signed-in user's
@@ -31,6 +32,8 @@ export function useProjectAutoSave(): void {
     allGuidance,
     verifications,
     busyTask,
+    persistedSignature,
+    setPersistedSignature,
   } = useGeneration();
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -44,6 +47,22 @@ export function useProjectAutoSave(): void {
       outputs.linkedinDescription,
   );
 
+  // Signature of the current savable content. When it equals persistedSignature
+  // there is nothing new to write — which is what makes a reopen inert (hydrate
+  // seeds persistedSignature) and de-duplicates identical back-to-back saves.
+  const signature = useMemo(
+    () =>
+      snapshotSignature({
+        context,
+        profile,
+        outputs,
+        interviewTopics,
+        verifications,
+        allGuidance,
+      }),
+    [context, profile, outputs, interviewTopics, verifications, allGuidance],
+  );
+
   useEffect(() => {
     // All the gates. Any failing one means "don't auto-save" — cleanly inert.
     if (!SAVED_FEATURE_ENABLED) return;
@@ -52,6 +71,9 @@ export function useProjectAutoSave(): void {
     if (!hasContent) return;
     // Never save mid-generation; wait for the run to settle.
     if (busyTask) return;
+    // Nothing new since the last save (or since a reopen hydrated this content):
+    // skip the write so reopening doesn't re-save and bump the project's order.
+    if (signature === persistedSignature) return;
 
     if (timer.current) {
       clearTimeout(timer.current);
@@ -73,9 +95,14 @@ export function useProjectAutoSave(): void {
         verifications,
         verificationModel: null,
       };
-      void saveProject(body).catch(() => {
-        // Best-effort: a failed background save is intentionally silent.
-      });
+      void saveProject(body)
+        .then(() => {
+          // Record what we just persisted so an unchanged workspace won't save again.
+          setPersistedSignature(signature);
+        })
+        .catch(() => {
+          // Best-effort: a failed background save is intentionally silent.
+        });
     }, AUTOSAVE_DEBOUNCE_MS);
 
     return () => {
@@ -88,6 +115,9 @@ export function useProjectAutoSave(): void {
     repoMetadata,
     hasContent,
     busyTask,
+    signature,
+    persistedSignature,
+    setPersistedSignature,
     context,
     profile,
     outputs,

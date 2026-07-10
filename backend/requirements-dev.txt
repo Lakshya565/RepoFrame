@@ -1,0 +1,8 @@
+# Development / test dependencies. Install on top of requirements.txt:
+#   pip install -r requirements.txt -r requirements-dev.txt
+# Kept separate so production installs stay lean (pytest is never imported by the
+# app). The offline test suite uses pytest's native unittest support — no extra
+# plugins are required (unittest.subTest is handled by pytest itself).
+-r requirements.txt
+
+pytest==9.1.1

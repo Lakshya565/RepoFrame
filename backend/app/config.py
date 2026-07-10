@@ -125,6 +125,28 @@ MAX_ANALYSES_PER_DAY_GLOBAL: int = int(os.getenv("MAX_ANALYSES_PER_DAY", "500"))
 
 
 # ============================================================
+# Enforced spend caps (Phase 16.3)
+# ============================================================
+# These ARE enforced (unlike the placeholders above), but only when Supabase is
+# configured — the no-login dev flow has no per-user ledger and stays unlimited.
+# Enforcement counts rows in the `usage_metrics` table: every paid OpenAI call
+# (profile, each output, a revise, interview prep, a verify) records one row, so
+# the cap is on *paid generation calls per day*, which bounds spend directly. A
+# full analyze→generate-all→verify cycle is roughly 6–8 calls. Both are
+# env-tunable; the launch defaults are deliberately tight and can be raised as
+# usage is observed (see services/rate_limit.py, which reads these live).
+#
+# Per-user/day quota keys on the JWT-verified user_id (not a spoofable IP/session),
+# so it survives across a user's browser sessions. The global/day cap is the
+# backstop against many free GitHub accounts (Sybil) each spending under the
+# per-user limit.
+MAX_LLM_CALLS_PER_USER_PER_DAY: int = int(
+    os.getenv("MAX_LLM_CALLS_PER_USER_PER_DAY", "3")
+)
+MAX_LLM_CALLS_PER_DAY_GLOBAL: int = int(os.getenv("MAX_LLM_CALLS_PER_DAY", "300"))
+
+
+# ============================================================
 # Optional Password Gate (placeholder)
 # ============================================================
 # When ACCESS_PASSWORD is set, early deployments can require a shared
@@ -183,3 +205,20 @@ GITHUB_APP_SLUG: str = os.getenv("GITHUB_APP_SLUG", "")
 GITHUB_APP_PRIVATE_KEY: str = os.getenv("GITHUB_APP_PRIVATE_KEY", "")
 GITHUB_APP_PRIVATE_KEY_PATH: str = os.getenv("GITHUB_APP_PRIVATE_KEY_PATH", "")
 GITHUB_APP_WEBHOOK_SECRET: str = os.getenv("GITHUB_APP_WEBHOOK_SECRET", "")
+
+
+# ============================================================
+# CORS allowed origins (Phase 16.4 — deployment)
+# ============================================================
+# Which browser origins may call the API. Defaults to the local dev frontend, so
+# nothing changes locally. In production set CORS_ALLOW_ORIGINS to the deployed
+# frontend origin(s), comma-separated (e.g.
+# "https://repoframe.vercel.app,https://www.repoframe.app"). Kept narrow on purpose
+# — the API is only meant to be called by RepoFrame's own frontend.
+CORS_ALLOW_ORIGINS: list[str] = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ALLOW_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
+    ).split(",")
+    if origin.strip()
+]

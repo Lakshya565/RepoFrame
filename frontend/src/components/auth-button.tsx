@@ -1,8 +1,9 @@
 "use client";
 
-import { LogIn, LogOut } from "lucide-react";
+import { LogOut } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { GithubMark } from "@/components/github-mark";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/lib/auth-context";
 
@@ -38,9 +39,10 @@ export function AuthButton() {
     return (
       <div className="flex items-center gap-2">
         <span
-          className="hidden max-w-[12rem] truncate text-sm text-muted-foreground sm:inline"
+          className="hidden max-w-[12rem] items-center gap-1.5 truncate text-sm text-muted-foreground sm:inline-flex"
           title={label}
         >
+          <GithubMark className="size-3.5 shrink-0" />
           {label}
         </span>
         <Button variant="ghost" size="sm" onClick={() => void signOut()}>
@@ -58,7 +60,7 @@ export function AuthButton() {
       size="sm"
       onClick={() => void signInWithGitHub()}
     >
-      <LogIn />
+      <GithubMark />
       Log in with GitHub
     </Button>
   );

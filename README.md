@@ -105,6 +105,52 @@ cd backend
 .\.venv\Scripts\python.exe -m unittest discover -s tests
 ```
 
+(Or `python -m pytest` after `pip install -r requirements-dev.txt`.)
+
+## Deployment
+
+RepoFrame deploys as three pieces: the **frontend** on Vercel, the **backend** on a
+container/VM host (Render, Fly.io, or Railway), and **Supabase** for auth + persistence.
+
+**Golden rule:** only the two `NEXT_PUBLIC_*` values (Supabase URL + publishable/anon key)
+and `NEXT_PUBLIC_GITHUB_APP_SLUG` may live in the frontend. Every other secret —
+`OPENAI_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `GITHUB_APP_PRIVATE_KEY`,
+`GITHUB_APP_WEBHOOK_SECRET` — is backend-only and must never reach the browser bundle.
+
+### Backend (Render / Fly.io / Railway)
+
+- Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- Health check: `GET /health`
+- Set every value from `backend/.env.example` in the host's env (secrets included).
+- `CORS_ALLOW_ORIGINS` → your deployed frontend origin(s), comma-separated
+  (e.g. `https://repoframe.vercel.app`). Defaults to localhost, so this MUST be set.
+- Spend caps (`MAX_LLM_CALLS_PER_USER_PER_DAY`, `MAX_LLM_CALLS_PER_DAY`) are enforced
+  once Supabase is configured; tune them for your launch.
+
+### Frontend (Vercel)
+
+- `NEXT_PUBLIC_API_BASE_URL` → the deployed backend URL.
+- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+  `NEXT_PUBLIC_GITHUB_APP_SLUG` → the production values.
+- `NEXT_PUBLIC_SHOW_SAVED=true` to expose the saved-projects / History surfaces.
+
+### Supabase + GitHub (dashboard config)
+
+- Run the migration in `supabase/migrations/` against the production project.
+- **Auth → URL Configuration:** Site URL = your frontend origin; Redirect URLs must
+  include `https://<frontend>/**`.
+- **GitHub OAuth App** (identity, wired into Supabase): keep the client id/secret current
+  in Supabase → Providers → GitHub. A stale secret surfaces as
+  `Unable to exchange external code` at login.
+- **GitHub App** (repo access): set the Webhook URL to `https://<backend>/api/github/webhook`
+  (with `GITHUB_APP_WEBHOOK_SECRET`) and the Setup URL to `https://<frontend>/github/installed`.
+
+### Post-deploy smoke
+
+Health check green → signed-out demo loads → GitHub login round-trips on the production
+origin → a signed-in analyze → generate → verify → save → reopen works → a private-repo
+analyze works with the App installed → spend caps return a friendly 429 when hit.
+
 ## MVP Goals
 
 - Accept a GitHub repository URL from the user.

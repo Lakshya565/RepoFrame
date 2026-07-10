@@ -3,6 +3,7 @@ import { type ReactNode } from "react";
 import { SiteHeader } from "@/components/site-header";
 import { AnalysisChrome } from "@/components/analysis-chrome";
 import { ProjectAutoSave } from "@/components/project-auto-save";
+import { ProjectHydrator } from "@/components/project-hydrator";
 import { GenerationProvider } from "@/lib/generation-context";
 
 type AnalysisLayoutProps = {
@@ -34,6 +35,10 @@ export default async function AnalysisLayout({
         {/* Headless: persists the workspace after each generation when the saved-
             projects feature is on and the user is signed in (inert otherwise). */}
         <ProjectAutoSave />
+        {/* Headless: when opened with ?projectId= (reopen from History), loads that
+            saved snapshot into the workspace so the Generate page is pre-filled;
+            inert for a normal fresh analysis. */}
+        <ProjectHydrator />
         <AnalysisChrome owner={owner} repo={repo} basePath={basePath}>
           {children}
         </AnalysisChrome>

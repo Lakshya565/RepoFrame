@@ -3,6 +3,7 @@ import logging
 import os
 import threading
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.services import supabase_client
@@ -127,17 +128,44 @@ def _supabase_total() -> LifetimeUsage:
     )
 
 
-# Append one run's usage as a new row.
-def _supabase_record(usage: TokenUsage) -> None:
+# Append one run's usage as a new row. user_id attributes the paid call to the
+# signed-in user (Phase 16.3) so the per-user daily quota can count it; it stays
+# None (column left null) on the unauthenticated dev path.
+def _supabase_record(usage: TokenUsage, user_id: str | None = None) -> None:
     client = supabase_client.get_client()
-    client.table("usage_metrics").insert(
-        {
-            "prompt_tokens": usage.prompt_tokens,
-            "completion_tokens": usage.completion_tokens,
-            "reasoning_tokens": usage.reasoning_tokens,
-            "total_tokens": usage.total_tokens,
-        }
-    ).execute()
+    row = {
+        "prompt_tokens": usage.prompt_tokens,
+        "completion_tokens": usage.completion_tokens,
+        "reasoning_tokens": usage.reasoning_tokens,
+        "total_tokens": usage.total_tokens,
+    }
+    if user_id is not None:
+        row["user_id"] = user_id
+    client.table("usage_metrics").insert(row).execute()
+
+
+def _today_start_iso() -> str:
+    """Midnight UTC today as an ISO-8601 string — the lower bound for 'today' counts."""
+    now = datetime.now(timezone.utc)
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return start.isoformat()
+
+
+# Counts paid-call rows recorded so far today (Phase 16.3 spend caps). With a
+# user_id it counts that user's calls (the per-user quota); without one it counts
+# every user's calls (the global cap). Supabase-only — the caller (rate_limit)
+# gates on is_configured() first, so this is never reached on the JSON dev path.
+def calls_today(user_id: str | None = None) -> int:
+    client = supabase_client.get_client()
+    query = (
+        client.table("usage_metrics")
+        .select("id", count="exact")
+        .gte("recorded_at", _today_start_iso())
+    )
+    if user_id is not None:
+        query = query.eq("user_id", user_id)
+    result = query.execute()
+    return result.count or 0
 
 
 # Returns the lifetime totals for the usage endpoint. Read-only. Uses Supabase when
@@ -172,15 +200,18 @@ def add(usage: TokenUsage, path: Path = _DEFAULT_PATH) -> LifetimeUsage:
 # recorded, so the ledger only ever reflects real spend. A ledger write must never
 # discard an already-completed (already-paid-for) generation, so any storage
 # failure is logged and swallowed rather than raised.
-def record(usage: TokenUsage, path: Path = _DEFAULT_PATH) -> None:
+def record(
+    usage: TokenUsage, path: Path = _DEFAULT_PATH, user_id: str | None = None
+) -> None:
     if usage == EMPTY_USAGE:
         return
     # Prefer Supabase when configured; a failed ledger write must never discard an
     # already-completed (already-paid-for) generation, so failures are logged and
-    # swallowed rather than raised.
+    # swallowed rather than raised. user_id attributes the row to the signed-in user
+    # for the per-user daily quota (Phase 16.3); the JSON fallback is global-only.
     if supabase_client.is_configured():
         try:
-            _supabase_record(usage)
+            _supabase_record(usage, user_id)
         except Exception as exc:  # noqa: BLE001 - see above; never raise here
             logger.warning("Could not record usage to Supabase: %s", exc)
         return

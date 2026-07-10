@@ -1,10 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { ArrowRight, LogIn } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
+import { GithubMark } from "@/components/github-mark";
 
 // Call-to-action shown on the demo. A signed-in visitor is nudged to analyze their
 // own repo; everyone else is prompted to log in. Kept tiny and client-side so the
@@ -24,7 +25,7 @@ export function DemoCta() {
 
   return (
     <Button variant="brand" onClick={() => void signInWithGitHub()}>
-      <LogIn />
+      <GithubMark />
       Log in with GitHub to analyze your own repo
     </Button>
   );

@@ -29,7 +29,7 @@ from app.schemas.profile import (
 )
 from app.schemas.usage import UsageTotals
 from app.schemas.verify import VerifyClaimsRequest, VerifyClaimsResponse
-from app.services import metrics_store, usage_store
+from app.services import metrics_store, rate_limit, usage_store
 from app.services.claim_verifier import (
     VERIFY_STAGE_EVIDENCE,
     verify_claims,
@@ -87,6 +87,8 @@ def generate_profile(
     request: GenerateProfileRequest,
     user: AuthenticatedUser | None = Depends(require_user_when_configured),
 ) -> GenerateProfileResponse:
+    # Enforce the daily spend caps before any paid work (Phase 16.3); 429 if at cap.
+    rate_limit.enforce_llm_quota(user)
     try:
         parsed_repo = parse_github_repo_url(request.repo_url)
         repo_access.apply_repo_access(user, parsed_repo.owner, parsed_repo.repo)
@@ -143,8 +145,8 @@ def generate_profile(
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
     # Record the real usage to the lifetime ledger (safe: a ledger failure never
-    # discards the completed generation).
-    usage_store.record(usage)
+    # discards the completed generation), attributed to the user for the daily quota.
+    usage_store.record(usage, user_id=user.user_id if user else None)
     # Profile generation is the canonical "analyze a repo" action (Phase 13).
     metrics_store.increment(
         repos_analyzed=1,
@@ -188,7 +190,11 @@ def generate_profile(
 # pipeline and the profile-generation call. The optional sections list scopes a
 # regenerate to one section; all generation logic lives in output_generator.
 @router.post("/outputs", response_model=GenerateOutputsResponse)
-def generate_outputs(request: GenerateOutputsRequest) -> GenerateOutputsResponse:
+def generate_outputs(
+    request: GenerateOutputsRequest,
+    user: AuthenticatedUser | None = Depends(require_user_when_configured),
+) -> GenerateOutputsResponse:
+    rate_limit.enforce_llm_quota(user)
     try:
         with metrics_store.timed("llm"):
             outputs, estimated_input_tokens, usage = generate_core_outputs(
@@ -197,7 +203,7 @@ def generate_outputs(request: GenerateOutputsRequest) -> GenerateOutputsResponse
     except LLMError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    usage_store.record(usage)
+    usage_store.record(usage, user_id=user.user_id if user else None)
     metrics_store.increment(outputs_generated=1)
 
     return GenerateOutputsResponse(
@@ -213,7 +219,11 @@ def generate_outputs(request: GenerateOutputsRequest) -> GenerateOutputsResponse
 # generate endpoint with only the revised section populated, so the frontend can
 # merge it without disturbing the other outputs.
 @router.post("/outputs/revise", response_model=GenerateOutputsResponse)
-def revise_output_endpoint(request: ReviseOutputRequest) -> GenerateOutputsResponse:
+def revise_output_endpoint(
+    request: ReviseOutputRequest,
+    user: AuthenticatedUser | None = Depends(require_user_when_configured),
+) -> GenerateOutputsResponse:
+    rate_limit.enforce_llm_quota(user)
     try:
         with metrics_store.timed("llm"):
             outputs, estimated_input_tokens, usage = revise_output(
@@ -225,7 +235,7 @@ def revise_output_endpoint(request: ReviseOutputRequest) -> GenerateOutputsRespo
     except LLMError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    usage_store.record(usage)
+    usage_store.record(usage, user_id=user.user_id if user else None)
 
     return GenerateOutputsResponse(
         outputs=outputs,
@@ -241,7 +251,9 @@ def revise_output_endpoint(request: ReviseOutputRequest) -> GenerateOutputsRespo
 @router.post("/interview-prep", response_model=GenerateInterviewPrepResponse)
 def generate_interview_prep_endpoint(
     request: GenerateInterviewPrepRequest,
+    user: AuthenticatedUser | None = Depends(require_user_when_configured),
 ) -> GenerateInterviewPrepResponse:
+    rate_limit.enforce_llm_quota(user)
     try:
         with metrics_store.timed("llm"):
             topics, estimated_input_tokens, usage = generate_interview_prep(
@@ -250,7 +262,7 @@ def generate_interview_prep_endpoint(
     except LLMError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    usage_store.record(usage)
+    usage_store.record(usage, user_id=user.user_id if user else None)
 
     return GenerateInterviewPrepResponse(
         topics=topics,
@@ -267,7 +279,9 @@ def generate_interview_prep_endpoint(
 @router.post("/interview-prep/revise", response_model=GenerateInterviewPrepResponse)
 def revise_interview_prep_endpoint(
     request: ReviseInterviewPrepRequest,
+    user: AuthenticatedUser | None = Depends(require_user_when_configured),
 ) -> GenerateInterviewPrepResponse:
+    rate_limit.enforce_llm_quota(user)
     try:
         with metrics_store.timed("llm"):
             topics, estimated_input_tokens, usage = revise_interview_prep(
@@ -276,7 +290,7 @@ def revise_interview_prep_endpoint(
     except LLMError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    usage_store.record(usage)
+    usage_store.record(usage, user_id=user.user_id if user else None)
 
     return GenerateInterviewPrepResponse(
         topics=topics,
@@ -336,6 +350,7 @@ def verify_claims_endpoint(
     request: VerifyClaimsRequest,
     user: AuthenticatedUser | None = Depends(require_user_when_configured),
 ) -> VerifyClaimsResponse:
+    rate_limit.enforce_llm_quota(user)
     try:
         evidence = _gather_verify_evidence(request.repo_url, user)
         with metrics_store.timed("llm"):
@@ -353,7 +368,7 @@ def verify_claims_endpoint(
     except LLMError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    usage_store.record(usage)
+    usage_store.record(usage, user_id=user.user_id if user else None)
     _record_claim_metrics(verifications)
 
     return VerifyClaimsResponse(
@@ -383,6 +398,10 @@ async def verify_claims_stream_endpoint(
     request: VerifyClaimsRequest,
     user: AuthenticatedUser | None = Depends(require_user_when_configured),
 ) -> StreamingResponse:
+    # Enforce the daily caps before opening the stream, so a 429 surfaces as a
+    # normal pre-stream HTTP error the client already handles (Phase 16.3).
+    rate_limit.enforce_llm_quota(user)
+
     event_queue: queue.Queue = queue.Queue()
 
     def emit(payload: dict) -> None:
@@ -407,7 +426,7 @@ async def verify_claims_stream_endpoint(
                     progress=on_progress,
                 )
 
-            usage_store.record(usage)
+            usage_store.record(usage, user_id=user.user_id if user else None)
             _record_claim_metrics(verifications)
 
             response = VerifyClaimsResponse(

@@ -565,11 +565,23 @@ offline and zero-token (fake repos, fake HTTP client, crafted JWTs).
 
 ---
 
-# Phase 16: Deployment
+# Phase 16: UI/UX Pass + Deployment
+
+> **Scope expanded 2026-07-07.** The remaining **UI/UX pass is folded into Phase 16, ahead of
+> deployment** (polish, then ship). The full, structured, sub-phased build plan lives in
+> **`PHASE_16_PLAN.md`** — build from it sub-phase by sub-phase (16.0 → 16.4). The queued
+> animations (analysis overview, icon-cloud ripple, theme toggle, Generate-page motion) are
+> **already done**, so the UI pass is: **16.0** reopen-from-history (open loads live *and*
+> pre-fills the Generate page from the saved snapshot — the one unfinished Phase-15 criterion) +
+> Saved/History polish; **16.1** the production redo of the Phase-15 auth/demo surfaces; **16.2**
+> cross-cutting states/landing/responsive/a11y. Deployment (the scope below) is the tail end:
+> **16.3** rate-limit enforcement + webhook activation, **16.4** production deploy.
 
 ## Goal
 
-Get it online with controlled access and measurable usage.
+Take RepoFrame from structurally-complete to **demoable and deployable**: one polished,
+responsive, consistently-animated product, then online with controlled access and measurable
+usage.
 
 ## Deploy
 

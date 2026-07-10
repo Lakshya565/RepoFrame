@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FolderOpen, Loader2, Trash2 } from "lucide-react";
+import { FolderGit2, FolderOpen, Loader2, Trash2 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -21,6 +21,30 @@ import { ErrorState } from "@/components/states";
 // and the fetch lifecycle (loading / error / empty / list).
 
 const LIST_ERROR = "RepoFrame could not load your saved projects.";
+
+// Human "updated 3 days ago" from an ISO timestamp, so the list reads at a glance;
+// the exact date stays available in the element's title. Falls back to a plain
+// locale date for anything older than ~a month.
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const seconds = Math.round((Date.now() - then) / 1000);
+  const units: [Intl.RelativeTimeFormatUnit, number][] = [
+    ["day", 86400],
+    ["hour", 3600],
+    ["minute", 60],
+  ];
+  if (seconds < 45) return "just now";
+  if (seconds < 86400 * 30) {
+    const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+    for (const [unit, secondsPer] of units) {
+      if (seconds >= secondsPer) {
+        return formatter.format(-Math.round(seconds / secondsPer), unit);
+      }
+    }
+  }
+  return new Date(iso).toLocaleDateString();
+}
 
 export function SavedProjectsList() {
   const { status } = useAuth();
@@ -130,21 +154,37 @@ export function SavedProjectsList() {
       {projects.map((project) => (
         <li key={project.id}>
           <Card className="flex items-center justify-between gap-4 p-4">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold">
-                {project.owner}/{project.repo}
-              </p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Updated {new Date(project.updatedAt).toLocaleDateString()}
-              </p>
+            <div className="flex min-w-0 items-center gap-3">
+              <span
+                className="hidden size-9 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground sm:flex"
+                aria-hidden
+              >
+                <FolderGit2 className="size-4" />
+              </span>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold">
+                  {project.owner}/{project.repo}
+                </p>
+                <p
+                  className="mt-0.5 text-xs text-muted-foreground"
+                  title={new Date(project.updatedAt).toLocaleString()}
+                >
+                  Updated {relativeTime(project.updatedAt)}
+                </p>
+              </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <Button
                 variant="outline"
                 size="sm"
+                aria-label={`Open ${project.owner}/${project.repo}`}
                 onClick={() =>
+                  // Reopen (Phase 16.0): same route as a fresh paste, plus
+                  // ?projectId so the layout's ProjectHydrator pre-fills the
+                  // Generate page from this saved snapshot while the Analysis page
+                  // loads live as usual.
                   router.push(
-                    `/analysis/${encodeURIComponent(project.owner)}/${encodeURIComponent(project.repo)}`,
+                    `/analysis/${encodeURIComponent(project.owner)}/${encodeURIComponent(project.repo)}?projectId=${encodeURIComponent(project.id)}`,
                   )
                 }
               >

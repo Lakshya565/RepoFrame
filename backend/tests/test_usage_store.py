@@ -62,27 +62,52 @@ class UsageStoreTests(unittest.TestCase):
         self.assertEqual(usage_store.get_total(self.path).total_tokens, 0)
 
 
-# A minimal fake Supabase client: insert() appends a row, select().execute()
-# returns all rows — enough to exercise _supabase_record / _supabase_total offline.
+# A minimal fake Supabase client. insert() appends a row; select() without a count
+# returns all rows (for _supabase_total); select(count="exact") returns a .count of
+# the rows matching any chained .eq() filters (for calls_today). .gte() is accepted
+# and ignored — the fake has no clock, so "today" is treated as "all rows", which is
+# fine for exercising the query plumbing offline.
 class _FakeTable:
     def __init__(self, rows: list) -> None:
         self._rows = rows
         self._selecting = False
+        self._counting = False
+        self._filters: list[tuple[str, object]] = []
 
     def insert(self, row: dict) -> "_FakeTable":
         self._rows.append(row)
         return self
 
-    def select(self, _columns: str) -> "_FakeTable":
+    def select(self, _columns: str, count: str | None = None) -> "_FakeTable":
         self._selecting = True
+        self._counting = count is not None
+        return self
+
+    def gte(self, _column: str, _value: object) -> "_FakeTable":
+        return self
+
+    def eq(self, column: str, value: object) -> "_FakeTable":
+        self._filters.append((column, value))
         return self
 
     def execute(self):
         class _Result:
             pass
 
+        rows = self._rows
+        for column, value in self._filters:
+            rows = [row for row in rows if row.get(column) == value]
+
         result = _Result()
-        result.data = list(self._rows) if self._selecting else None
+        if self._counting:
+            result.count = len(rows)
+            result.data = None
+        elif self._selecting:
+            result.count = None
+            result.data = list(rows)
+        else:
+            result.count = None
+            result.data = None
         return result
 
 
@@ -94,7 +119,7 @@ class _FakeClient:
         return _FakeTable(self.rows)
 
 
-# The Supabase-backed path (Phase 15.7), fully offline via the fake client.
+# The Supabase-backed path (Phase 15.7 + 16.3), fully offline via the fake client.
 class SupabaseUsageStoreTests(unittest.TestCase):
     def test_record_then_total_via_supabase(self) -> None:
         fake = _FakeClient()
@@ -112,6 +137,34 @@ class SupabaseUsageStoreTests(unittest.TestCase):
         self.assertEqual(total.runs, 2)
         # Only the two non-empty runs were inserted.
         self.assertEqual(len(fake.rows), 2)
+
+    def test_record_threads_user_id(self) -> None:
+        # A user_id is written onto the row for the per-user quota (Phase 16.3); a
+        # record with no user_id leaves the column unset.
+        fake = _FakeClient()
+        with patch.object(supabase_client, "is_configured", return_value=True), patch.object(
+            supabase_client, "get_client", return_value=fake
+        ):
+            usage_store.record(TokenUsage(1, 1, 0, 2), user_id="user-1")
+            usage_store.record(TokenUsage(1, 1, 0, 2))
+
+        self.assertEqual(fake.rows[0]["user_id"], "user-1")
+        self.assertNotIn("user_id", fake.rows[1])
+
+    def test_calls_today_counts_global_and_per_user(self) -> None:
+        fake = _FakeClient()
+        with patch.object(supabase_client, "is_configured", return_value=True), patch.object(
+            supabase_client, "get_client", return_value=fake
+        ):
+            usage_store.record(TokenUsage(1, 1, 0, 2), user_id="user-1")
+            usage_store.record(TokenUsage(1, 1, 0, 2), user_id="user-1")
+            usage_store.record(TokenUsage(1, 1, 0, 2), user_id="user-2")
+
+            # Global counts every row; per-user counts only that user's rows.
+            self.assertEqual(usage_store.calls_today(), 3)
+            self.assertEqual(usage_store.calls_today("user-1"), 2)
+            self.assertEqual(usage_store.calls_today("user-2"), 1)
+            self.assertEqual(usage_store.calls_today("user-3"), 0)
 
 
 if __name__ == "__main__":

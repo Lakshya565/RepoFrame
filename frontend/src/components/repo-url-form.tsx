@@ -3,12 +3,13 @@
 import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Loader2, LogIn } from "lucide-react";
+import { ArrowRight, Loader2 } from "lucide-react";
 
 import { parseRepoUrl } from "@/lib/repo-api";
 import { useAuth } from "@/lib/auth-context";
 import { isDemoActive } from "@/lib/demo-fixture";
 import { Button } from "@/components/ui/button";
+import { GithubMark } from "@/components/github-mark";
 import { Input } from "@/components/ui/input";
 import { GlowText } from "@/components/glow-text";
 
@@ -72,7 +73,7 @@ export function RepoUrlForm() {
             className="h-11 px-5 sm:w-auto"
             onClick={() => void signInWithGitHub()}
           >
-            <LogIn />
+            <GithubMark />
             Log in with GitHub
           </Button>
           <Link

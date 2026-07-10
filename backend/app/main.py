@@ -5,6 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app import config
 from app.routers import generate, github, github_app, metrics, projects, repo, usage
 from app.services import metrics_store
 from app.services.repo_parser import INVALID_REPO_URL_MESSAGE
@@ -38,13 +39,11 @@ async def metrics_middleware(request: Request, call_next):
         )
     return response
 
-# Local frontend origins are allowed during development; production can narrow this later.
+# Allowed browser origins. Defaults to the local dev frontend; production sets
+# CORS_ALLOW_ORIGINS to the deployed frontend origin(s). See config.py.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=config.CORS_ALLOW_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
