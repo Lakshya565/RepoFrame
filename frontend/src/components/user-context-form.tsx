@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2 } from "lucide-react";
+import { Loader2, Lock } from "lucide-react";
 
 import {
   COLLABORATION_OPTIONS,
@@ -11,7 +11,9 @@ import {
   type UserContextTextField,
   type UserContextTextKey,
 } from "@/lib/user-context";
+import { useDemo } from "@/lib/demo-mode";
 import { AnimatedDivider } from "@/components/animated-divider";
+import { GateOverlay } from "@/components/gate-overlay";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -37,6 +39,10 @@ export function UserContextForm({
   onContextChange,
   seeding,
 }: UserContextFormProps) {
+  // In the signed-out demo, the guesses are frozen (locked once seeded) and the
+  // user's own context is login-gated — nothing here is editable without an account.
+  const demo = useDemo();
+
   // Updates a single free-text field while leaving the rest of the answers
   // untouched. The parent owns the context, so updates flow up.
   function handleTextChange(key: UserContextTextKey, value: string) {
@@ -52,6 +58,30 @@ export function UserContextForm({
     });
   }
 
+  // The "Your context" inputs (ownership + free-text fields), extracted so the demo
+  // can render them behind a single login gate without duplicating the markup.
+  const yourContextFields = (
+    <>
+      <div className="mt-4">
+        <OwnershipChoice
+          value={context.collaboration}
+          onChange={handleCollaborationChange}
+        />
+      </div>
+
+      <div className="mt-5 grid gap-5">
+        {YOUR_CONTEXT_FIELDS.map((field) => (
+          <ContextField
+            field={field}
+            key={field.key}
+            onChange={handleTextChange}
+            value={context[field.key]}
+          />
+        ))}
+      </div>
+    </>
+  );
+
   return (
     <Card beam className="p-6">
       <h3 className="text-lg font-semibold">
@@ -63,17 +93,11 @@ export function UserContextForm({
         carefully.
       </p>
 
-      {/* Part 1 — RepoFrame's guess: an inferred first pass to review/edit. */}
+      {/* Part 1 — RepoFrame's guess: an inferred first pass to review/edit. While
+          seeding, each guess field shows its own inset "analyzing" spinner and is
+          locked, so the user can't type over a value that's about to arrive. */}
       <section className="mt-6">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <h4 className="text-base font-semibold">RepoFrame&apos;s Guess</h4>
-          {seeding ? (
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin text-brand" />
-              Analyzing the repo…
-            </span>
-          ) : null}
-        </div>
+        <h4 className="text-base font-semibold">RepoFrame&apos;s Guess</h4>
         <p className="mt-1 text-sm text-muted-foreground">
           Review or edit these before generating. These guesses come from the
           README, file tree, detected stack, and selected repo evidence.
@@ -84,6 +108,9 @@ export function UserContextForm({
             <ContextField
               field={field}
               key={field.key}
+              loading={seeding}
+              // In the demo the guesses are frozen once seeded, so lock them.
+              locked={demo && !seeding}
               onChange={handleTextChange}
               value={context[field.key]}
             />
@@ -102,23 +129,16 @@ export function UserContextForm({
           or intent.
         </p>
 
-        <div className="mt-4">
-          <OwnershipChoice
-            value={context.collaboration}
-            onChange={handleCollaborationChange}
-          />
-        </div>
-
-        <div className="mt-5 grid gap-5">
-          {YOUR_CONTEXT_FIELDS.map((field) => (
-            <ContextField
-              field={field}
-              key={field.key}
-              onChange={handleTextChange}
-              value={context[field.key]}
-            />
-          ))}
-        </div>
+        {demo ? (
+          <GateOverlay
+            title="Log in to add your own context"
+            className="mt-4"
+          >
+            {yourContextFields}
+          </GateOverlay>
+        ) : (
+          yourContextFields
+        )}
       </section>
     </Card>
   );
@@ -128,41 +148,71 @@ type ContextFieldProps = {
   field: UserContextTextField;
   value: string;
   onChange: (key: UserContextTextKey, value: string) => void;
+  // True only for the guess fields while RepoFrame is still inferring them: the
+  // control is disabled and an inset spinner sits over it, so the user can't type
+  // into a box whose value is about to be filled in.
+  loading?: boolean;
+  // True in the demo once seeded: the value is frozen, so the control is read-only
+  // and a small lock sits in the label. Distinct from `loading` (which is transient).
+  locked?: boolean;
 };
 
 // Renders one free-text question (label + optional chip, the input or textarea,
 // and helper text) from the shared field metadata, so both sections stay
 // consistent without repeating the markup.
-function ContextField({ field, value, onChange }: ContextFieldProps) {
+function ContextField({
+  field,
+  value,
+  onChange,
+  loading = false,
+  locked = false,
+}: ContextFieldProps) {
   const id = `user-context-${field.key}`;
   return (
     <div>
       <label className="flex items-center gap-2 text-sm font-medium" htmlFor={id}>
         {field.label}
+        {locked ? (
+          <Lock aria-hidden className="size-3 text-muted-foreground" />
+        ) : null}
         {field.optional ? (
           <span className="text-xs font-normal text-muted-foreground">
             Optional
           </span>
         ) : null}
       </label>
-      {field.multiline ? (
-        <Textarea
-          className="mt-2 min-h-24 resize-y"
-          id={id}
-          onChange={(event) => onChange(field.key, event.target.value)}
-          placeholder={field.placeholder}
-          value={value}
-        />
-      ) : (
-        <Input
-          className="mt-2 h-11"
-          id={id}
-          onChange={(event) => onChange(field.key, event.target.value)}
-          placeholder={field.placeholder}
-          type="text"
-          value={value}
-        />
-      )}
+      {/* Positioned wrapper so the loading spinner can sit inside the control's box
+          (the mt-2 lives here, not on the control, so inset-0 aligns exactly). */}
+      <div className="relative mt-2">
+        {field.multiline ? (
+          <Textarea
+            className={cn("min-h-24 resize-y", locked && "cursor-not-allowed")}
+            disabled={loading}
+            id={id}
+            onChange={(event) => onChange(field.key, event.target.value)}
+            placeholder={loading ? "" : field.placeholder}
+            readOnly={locked}
+            value={value}
+          />
+        ) : (
+          <Input
+            className={cn("h-11", locked && "cursor-not-allowed")}
+            disabled={loading}
+            id={id}
+            onChange={(event) => onChange(field.key, event.target.value)}
+            placeholder={loading ? "" : field.placeholder}
+            readOnly={locked}
+            type="text"
+            value={value}
+          />
+        )}
+        {loading ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin text-brand" />
+            Analyzing the repo…
+          </div>
+        ) : null}
+      </div>
       {/* Helper caption sits a shade darker than the input's muted placeholder so
           the two never blend into one gray block. */}
       <p className="mt-1.5 text-sm text-foreground/70">{field.helper}</p>

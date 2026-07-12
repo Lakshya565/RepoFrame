@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 
 import { fetchRepoMetadata, fetchTechStack } from "@/lib/repo-api";
+import { demoFetchRepoMetadata, demoFetchTechStack } from "@/lib/demo-analysis";
 import { type UserContext } from "@/lib/user-context";
 
 // How many detected technologies seed the "Technical focus" guess. Bounded so the
@@ -18,6 +19,9 @@ type SeedArgs = {
   // The provider's context setter — a functional update reads the latest answers,
   // so seeding only fills blank guess fields and never clobbers user edits.
   setContext: Dispatch<SetStateAction<UserContext>>;
+  // In the signed-out demo, seed from the frozen fixtures (same code path, same
+  // "analyzing" hint) instead of calling GitHub.
+  demo?: boolean;
 };
 
 // Seeds the "RepoFrame's guess" fields from FREE repo analysis — no OpenAI, no
@@ -35,6 +39,7 @@ export function useInferredContextGuesses({
   alreadySeeded,
   onSeeded,
   setContext,
+  demo = false,
 }: SeedArgs): { seeding: boolean } {
   // Only the very first, un-seeded mount shows the analyzing hint; a return visit
   // (already seeded) starts settled.
@@ -57,10 +62,15 @@ export function useInferredContextGuesses({
     async function seed() {
       try {
         // Both are free (GitHub-only) and independent, so fetch in parallel and
-        // tolerate either failing on its own.
+        // tolerate either failing on its own. In the demo these resolve from the
+        // frozen fixtures — no network — but through the very same seeding path.
         const [metadata, techStack] = await Promise.all([
-          fetchRepoMetadata(repoUrl).catch(() => null),
-          fetchTechStack(repoUrl).catch(() => null),
+          (demo ? demoFetchRepoMetadata() : fetchRepoMetadata(repoUrl)).catch(
+            () => null,
+          ),
+          (demo ? demoFetchTechStack() : fetchTechStack(repoUrl)).catch(
+            () => null,
+          ),
         ]);
 
         const purpose = metadata?.description?.trim() ?? "";
@@ -94,7 +104,7 @@ export function useInferredContextGuesses({
     }
 
     void seed();
-  }, [repoUrl, alreadySeeded, onSeeded, setContext]);
+  }, [repoUrl, alreadySeeded, onSeeded, setContext, demo]);
 
   return { seeding };
 }

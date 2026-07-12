@@ -3,6 +3,8 @@
 import { createContext, useContext, type ReactNode } from "react";
 
 import { fetchTechStack, type TechStackResponse } from "@/lib/repo-api";
+import { demoFetchTechStack } from "@/lib/demo-analysis";
+import { useDemo } from "@/lib/demo-mode";
 import { useRepoResource, type RepoResource } from "@/lib/use-repo-resource";
 
 // Shared error copy for the single tech-stack fetch.
@@ -26,7 +28,13 @@ export function TechStackProvider({
   repoUrl,
   children,
 }: TechStackProviderProps) {
-  const techStack = useRepoResource(repoUrl, fetchTechStack, TECH_STACK_ERROR);
+  // In the signed-out demo, resolve from the frozen fixture instead of GitHub.
+  const demo = useDemo();
+  const techStack = useRepoResource(
+    repoUrl,
+    demo ? demoFetchTechStack : fetchTechStack,
+    TECH_STACK_ERROR,
+  );
 
   return (
     <TechStackContext.Provider value={techStack}>

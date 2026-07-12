@@ -30,9 +30,17 @@ import {
   type ProjectProfileData,
   type VerifyStage,
 } from "@/lib/repo-api";
-import { hasAnyUserContext, userContextEquals } from "@/lib/user-context";
+import { hasUserFilledContext, userContextEquals } from "@/lib/user-context";
 import { useGeneration } from "@/lib/generation-context";
 import { useInferredContextGuesses } from "@/lib/use-inferred-context";
+import { useDemo } from "@/lib/demo-mode";
+import { GateOverlay } from "@/components/gate-overlay";
+import {
+  demoGenerateInterview,
+  demoGenerateOutputs,
+  demoGenerateProfile,
+  demoVerifyClaims,
+} from "@/lib/demo-generation";
 
 type ProjectWriteupSectionProps = {
   repoUrl: string;
@@ -106,6 +114,10 @@ export function ProjectWriteupSection({
     refreshLifetime,
   } = useGeneration();
 
+  // The signed-out demo: every generation call resolves from the frozen fixture
+  // instead of OpenAI, and the context form + instruction boxes are login-gated.
+  const demo = useDemo();
+
   // Seed RepoFrame's "guess" context fields from free repo analysis (detected
   // stack -> technical focus, repo description -> purpose). Runs once per session
   // and only fills blank fields; `seeding` drives the form's analyzing hint. A
@@ -119,6 +131,7 @@ export function ProjectWriteupSection({
     alreadySeeded: guessesSeeded,
     onSeeded: markGuessesSeeded,
     setContext,
+    demo,
   });
 
   // Whether anything has been generated yet. Gates the verification agent (there
@@ -129,16 +142,18 @@ export function ProjectWriteupSection({
   );
 
   // Guided-flow step. Local UI state (the generated content itself persists in
-  // the provider). Returning users — whose outputs/context survived tab
-  // navigation — land on the Generate step their progress already unlocked.
+  // the provider). Returning users land on Generate only if they've generated
+  // something OR added their own context — NOT merely because RepoFrame's guesses
+  // seeded (which is why this uses hasUserFilledContext, not hasAnyUserContext).
+  // With empty user context and no output, it opens on Context.
   const [currentStep, setCurrentStep] = useState<GenerateStepId>(() =>
-    hasAnyOutput || hasAnyUserContext(context) ? 2 : 1,
+    hasAnyOutput || hasUserFilledContext(context) ? 2 : 1,
   );
   // The Generate step unlocks once the user leaves Context (explicitly, via
-  // Continue) or already has content from a previous visit. Context stays
+  // Continue) or already has content/context from a previous visit. Context stays
   // optional — Continue works with an empty questionnaire.
   const [contextAcknowledged, setContextAcknowledged] = useState(
-    () => hasAnyUserContext(context) || hasAnyOutput,
+    () => hasUserFilledContext(context) || hasAnyOutput,
   );
 
   // Live verification-agent progress from the streaming verify endpoint. Transient
@@ -187,7 +202,9 @@ export function ProjectWriteupSection({
     if (profile && profileContext && userContextEquals(profileContext, context)) {
       return profile;
     }
-    const response = await generateProfile(repoUrl, context);
+    const response = demo
+      ? await demoGenerateProfile()
+      : await generateProfile(repoUrl, context);
     setProfile(response.profile);
     setProfileContext(context);
     addUsage(response.usage);
@@ -213,16 +230,16 @@ export function ProjectWriteupSection({
     setError(null);
 
     try {
-      const profileResponse = await generateProfile(repoUrl, context);
+      const profileResponse = demo
+        ? await demoGenerateProfile()
+        : await generateProfile(repoUrl, context);
       setProfile(profileResponse.profile);
       setProfileContext(context);
       addUsage(profileResponse.usage);
 
-      const outputsResponse = await generateOutputs(
-        profileResponse.profile,
-        undefined,
-        allGuidance,
-      );
+      const outputsResponse = demo
+        ? await demoGenerateOutputs()
+        : await generateOutputs(profileResponse.profile, undefined, allGuidance);
       setOutputs(outputsResponse.outputs);
       addUsage(outputsResponse.usage);
       setBaselines({
@@ -235,10 +252,9 @@ export function ProjectWriteupSection({
         ),
       });
 
-      const interviewResponse = await generateInterviewPrep(
-        profileResponse.profile,
-        allGuidance,
-      );
+      const interviewResponse = demo
+        ? await demoGenerateInterview()
+        : await generateInterviewPrep(profileResponse.profile, allGuidance);
       setInterviewTopics(interviewResponse.topics);
       addUsage(interviewResponse.usage);
     } catch (caught) {
@@ -262,7 +278,9 @@ export function ProjectWriteupSection({
 
     try {
       const activeProfile = await ensureProfile();
-      const response = await generateOutputs(activeProfile, [section], guidance);
+      const response = demo
+        ? await demoGenerateOutputs()
+        : await generateOutputs(activeProfile, [section], guidance);
       setOutputs((current) => mergeSection(current, section, response.outputs));
       setBaseline(response.outputs, section);
       addUsage(response.usage);
@@ -289,12 +307,9 @@ export function ProjectWriteupSection({
     try {
       const activeProfile = await ensureProfile();
       const currentText = sectionToText(outputs, section);
-      const response = await reviseOutput(
-        activeProfile,
-        section,
-        currentText,
-        instruction,
-      );
+      const response = demo
+        ? await demoGenerateOutputs()
+        : await reviseOutput(activeProfile, section, currentText, instruction);
       setOutputs((current) => mergeSection(current, section, response.outputs));
       setBaseline(response.outputs, section);
       addUsage(response.usage);
@@ -318,7 +333,9 @@ export function ProjectWriteupSection({
 
     try {
       const activeProfile = await ensureProfile();
-      const response = await generateInterviewPrep(activeProfile, guidance);
+      const response = demo
+        ? await demoGenerateInterview()
+        : await generateInterviewPrep(activeProfile, guidance);
       setInterviewTopics(response.topics);
       addUsage(response.usage);
     } catch (caught) {
@@ -341,11 +358,9 @@ export function ProjectWriteupSection({
 
     try {
       const activeProfile = await ensureProfile();
-      const response = await reviseInterviewPrep(
-        activeProfile,
-        interviewTopics,
-        instruction,
-      );
+      const response = demo
+        ? await demoGenerateInterview()
+        : await reviseInterviewPrep(activeProfile, interviewTopics, instruction);
       setInterviewTopics(response.topics);
       addUsage(response.usage);
     } catch (caught) {
@@ -374,12 +389,13 @@ export function ProjectWriteupSection({
     setVerifyDetail(null);
 
     try {
-      const response = await verifyClaimsStream(repoUrl, context, outputs, {
-        onProgress: (event) => {
-          setVerifyStage(event.stage);
-          setVerifyDetail(event.detail);
-        },
-      });
+      const onProgress = (event: { stage: VerifyStage; detail: string | null }) => {
+        setVerifyStage(event.stage);
+        setVerifyDetail(event.detail);
+      };
+      const response = demo
+        ? await demoVerifyClaims(onProgress)
+        : await verifyClaimsStream(repoUrl, context, outputs, { onProgress });
       setVerifications(response.verifications);
       addUsage(response.usage);
     } catch (caught) {
@@ -531,6 +547,31 @@ function GenerateEverythingCard({
   onGuidanceChange,
   onGenerateAll,
 }: GenerateEverythingCardProps) {
+  // In the demo, steering the model with custom instructions is login-gated.
+  const demo = useDemo();
+  const instructions = (
+    <div className="mt-5">
+      <label className="text-sm font-medium" htmlFor="generate-all-guidance">
+        Instructions for the model (optional)
+      </label>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Added to the prompt for everything produced by Generate everything.
+      </p>
+      <Textarea
+        className="mt-2 resize-y"
+        disabled={busy}
+        id="generate-all-guidance"
+        maxLength={INSTRUCTION_MAX_LENGTH}
+        onChange={(event) => onGuidanceChange(event.target.value)}
+        placeholder="e.g. write for a backend role, keep everything concise"
+        value={allGuidance}
+      />
+      <div className="mt-1 text-right text-xs text-muted-foreground">
+        {allGuidance.length}/{INSTRUCTION_MAX_LENGTH}
+      </div>
+    </div>
+  );
+
   return (
     <Card beam className="p-6">
       <h3 className="text-lg font-semibold">Turn this repo into a writeup</h3>
@@ -543,26 +584,13 @@ function GenerateEverythingCard({
         read and understand your project. After that, it&apos;s faster.
       </p>
 
-      <div className="mt-5">
-        <label className="text-sm font-medium" htmlFor="generate-all-guidance">
-          Instructions for the model (optional)
-        </label>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Added to the prompt for everything produced by Generate everything.
-        </p>
-        <Textarea
-          className="mt-2 resize-y"
-          disabled={busy}
-          id="generate-all-guidance"
-          maxLength={INSTRUCTION_MAX_LENGTH}
-          onChange={(event) => onGuidanceChange(event.target.value)}
-          placeholder="e.g. write for a backend role, keep everything concise"
-          value={allGuidance}
-        />
-        <div className="mt-1 text-right text-xs text-muted-foreground">
-          {allGuidance.length}/{INSTRUCTION_MAX_LENGTH}
-        </div>
-      </div>
+      {demo ? (
+        <GateOverlay title="Log in to guide the model" className="mt-5">
+          {instructions}
+        </GateOverlay>
+      ) : (
+        instructions
+      )}
 
       <Button
         variant="brand"

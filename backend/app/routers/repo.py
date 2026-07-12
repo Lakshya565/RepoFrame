@@ -37,7 +37,7 @@ from app.services.github_service import (
     fetch_repo_tree,
 )
 from app.services import repo_access
-from app.services.auth import AuthenticatedUser, require_user_when_configured
+from app.services.auth import AuthenticatedUser, require_user_or_public_demo
 from app.services.repo_parser import RepoUrlParseError, parse_github_repo_url
 from app.services.tech_stack_detector import (
     collect_stack_evidence,
@@ -46,12 +46,14 @@ from app.services.tech_stack_detector import (
 
 # Login gate (Phase 15.3): when Supabase is configured, the repo-analysis
 # endpoints require a verified user; when unconfigured (local dev), they stay open.
-# Applied at the router level so the gate can't be forgotten on a new route.
-# Signed-out visitors never reach these — they render the static demo fixture.
+# Applied at the router level so the gate can't be forgotten on a new route. The one
+# exception is the public demo repo (config.DEMO_REPO_*): the signed-out product demo
+# loads its REAL analysis data live, so require_user_or_public_demo lets anonymous
+# reads of that single repo through while every other repo still requires login.
 router = APIRouter(
     prefix="/api/repo",
     tags=["repo"],
-    dependencies=[Depends(require_user_when_configured)],
+    dependencies=[Depends(require_user_or_public_demo)],
 )
 
 
@@ -76,7 +78,7 @@ def parse_repo(request: RepoParseRequest) -> RepoParseResponse:
 @router.post("/metadata", response_model=RepoMetadataResponse)
 def get_repo_metadata(
     request: RepoParseRequest,
-    user: AuthenticatedUser | None = Depends(require_user_when_configured),
+    user: AuthenticatedUser | None = Depends(require_user_or_public_demo),
 ) -> RepoMetadataResponse:
     try:
         parsed_repo = parse_github_repo_url(request.repo_url)
@@ -112,7 +114,7 @@ def get_repo_metadata(
 @router.post("/commit-activity", response_model=CommitActivityResponse)
 def get_repo_commit_activity(
     request: CommitActivityRequest,
-    user: AuthenticatedUser | None = Depends(require_user_when_configured),
+    user: AuthenticatedUser | None = Depends(require_user_or_public_demo),
 ) -> CommitActivityResponse:
     contributors_truncated = False
     try:
@@ -161,7 +163,7 @@ def get_repo_commit_activity(
 @router.post("/tree", response_model=RepoTreeResponse)
 def get_repo_tree(
     request: RepoParseRequest,
-    user: AuthenticatedUser | None = Depends(require_user_when_configured),
+    user: AuthenticatedUser | None = Depends(require_user_or_public_demo),
 ) -> RepoTreeResponse:
     try:
         parsed_repo = parse_github_repo_url(request.repo_url)
@@ -205,7 +207,7 @@ def get_repo_tree(
 @router.post("/ranked-files", response_model=RepoFileRankingResponse)
 def get_ranked_repo_files(
     request: RepoParseRequest,
-    user: AuthenticatedUser | None = Depends(require_user_when_configured),
+    user: AuthenticatedUser | None = Depends(require_user_or_public_demo),
 ) -> RepoFileRankingResponse:
     try:
         parsed_repo = parse_github_repo_url(request.repo_url)
@@ -252,7 +254,7 @@ def get_ranked_repo_files(
 @router.post("/tech-stack", response_model=TechStackResponse)
 def get_repo_tech_stack(
     request: RepoParseRequest,
-    user: AuthenticatedUser | None = Depends(require_user_when_configured),
+    user: AuthenticatedUser | None = Depends(require_user_or_public_demo),
 ) -> TechStackResponse:
     try:
         parsed_repo = parse_github_repo_url(request.repo_url)
@@ -318,7 +320,7 @@ def get_repo_tech_stack(
 @router.post("/file-contents", response_model=RepoFileContentResponse)
 def get_repo_file_contents(
     request: RepoParseRequest,
-    user: AuthenticatedUser | None = Depends(require_user_when_configured),
+    user: AuthenticatedUser | None = Depends(require_user_or_public_demo),
 ) -> RepoFileContentResponse:
     try:
         parsed_repo = parse_github_repo_url(request.repo_url)

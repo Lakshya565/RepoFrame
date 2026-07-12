@@ -24,6 +24,14 @@ REQUEST_TIMEOUT_SECONDS = 10
 COMMIT_STATS_MAX_ATTEMPTS = 3
 COMMIT_STATS_RETRY_DELAY_SECONDS = 1.2
 
+# The contributor-stats endpoint (behind the "all time" range) aggregates every
+# contributor's full history, so GitHub is more likely to answer 202 "still
+# computing" for longer than the plain commit-activity endpoint. Give it a little
+# more runway before surfacing the retryable 503. The frontend also polls, so this
+# just reduces how often the first "all" request has to bounce back for a retry.
+CONTRIB_STATS_MAX_ATTEMPTS = 5
+CONTRIB_STATS_RETRY_DELAY_SECONDS = 1.5
+
 BACKEND_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 load_dotenv(BACKEND_ENV_FILE)
@@ -367,8 +375,8 @@ def fetch_contributor_weeks(
     owner: str,
     repo: str,
     session: requests.Session | None = None,
-    max_attempts: int = COMMIT_STATS_MAX_ATTEMPTS,
-    retry_delay: float = COMMIT_STATS_RETRY_DELAY_SECONDS,
+    max_attempts: int = CONTRIB_STATS_MAX_ATTEMPTS,
+    retry_delay: float = CONTRIB_STATS_RETRY_DELAY_SECONDS,
     sleep=time.sleep,
 ) -> tuple[list[WeeklyCommitCount], bool]:
     client = session or requests.Session()

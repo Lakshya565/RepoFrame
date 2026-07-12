@@ -16,6 +16,10 @@ type AnalysisChromeProps = {
   // The repo's base route (e.g. "/analysis/facebook/react"), used to build the
   // tab links.
   basePath: string;
+  // Hides the developer toggle/panel (token spend + GitHub rate limit). The
+  // signed-out demo sets this — those operational readouts are meaningless when
+  // every call is a frozen fixture.
+  hideDeveloper?: boolean;
   children: React.ReactNode;
 };
 
@@ -29,6 +33,7 @@ export function AnalysisChrome({
   owner,
   repo,
   basePath,
+  hideDeveloper = false,
   children,
 }: AnalysisChromeProps) {
   const { sessionUsage, usageRefresh } = useGeneration();
@@ -47,15 +52,17 @@ export function AnalysisChrome({
           <ArrowLeft className="size-4" />
           Back
         </Link>
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-expanded={devOpen}
-          onClick={() => setDevOpen((open) => !open)}
-        >
-          <Wrench />
-          Developer
-        </Button>
+        {hideDeveloper ? null : (
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-expanded={devOpen}
+            onClick={() => setDevOpen((open) => !open)}
+          >
+            <Wrench />
+            Developer
+          </Button>
+        )}
       </div>
 
       <div className="mt-4">
@@ -67,7 +74,7 @@ export function AnalysisChrome({
         </p>
       </div>
 
-      {devOpen ? (
+      {devOpen && !hideDeveloper ? (
         <section className="mt-6 rounded-lg border border-dashed p-4">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Developer · removed before launch

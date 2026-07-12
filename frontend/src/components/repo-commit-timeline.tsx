@@ -6,7 +6,7 @@ import { Area, AreaChart, CartesianGrid, XAxis } from "recharts";
 import { GitCommitHorizontal } from "lucide-react";
 
 import {
-  fetchCommitActivity,
+  fetchCommitActivityPolling,
   type CommitActivityRange,
   type CommitActivityResponse,
 } from "@/lib/repo-api";
@@ -58,12 +58,15 @@ const numberFormatter = new Intl.NumberFormat("en-US");
 // showing the exact count and date for the nearest point. It reserves a fixed height
 // across every state so the page does not shift as it resolves.
 export function RepoCommitTimeline({ repoUrl }: RepoCommitTimelineProps) {
-  const [range, setRange] = useState<CommitActivityRange>("year");
+  const [range, setRange] = useState<CommitActivityRange>("month");
 
   // A range-scoped fetcher: changing the range gives useRepoResource a new fetcher,
-  // which re-runs the request for that window.
+  // which re-runs the request for that window. Uses the polling variant so the "all"
+  // range (heavier contributor stats) rides out GitHub's "still computing" 503
+  // instead of erroring — the card stays in its loading state until it resolves. The
+  // signed-out demo hits this live too (the public demo repo is allowed unauthed).
   const fetcher = useCallback(
-    (url: string) => fetchCommitActivity(url, range),
+    (url: string) => fetchCommitActivityPolling(url, range),
     [range],
   );
   const activity = useRepoResource(repoUrl, fetcher, COMMIT_ACTIVITY_ERROR);

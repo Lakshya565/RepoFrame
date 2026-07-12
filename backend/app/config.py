@@ -141,7 +141,7 @@ MAX_ANALYSES_PER_DAY_GLOBAL: int = int(os.getenv("MAX_ANALYSES_PER_DAY", "500"))
 # backstop against many free GitHub accounts (Sybil) each spending under the
 # per-user limit.
 MAX_LLM_CALLS_PER_USER_PER_DAY: int = int(
-    os.getenv("MAX_LLM_CALLS_PER_USER_PER_DAY", "3")
+    os.getenv("MAX_LLM_CALLS_PER_USER_PER_DAY", "16")
 )
 MAX_LLM_CALLS_PER_DAY_GLOBAL: int = int(os.getenv("MAX_LLM_CALLS_PER_DAY", "300"))
 
@@ -222,3 +222,17 @@ CORS_ALLOW_ORIGINS: list[str] = [
     ).split(",")
     if origin.strip()
 ]
+
+
+# ============================================================
+# Public demo repo (signed-out product demo)
+# ============================================================
+# The signed-out /demo route shows a LIVE analysis of one fixed public repo
+# (RepoFrame itself). To let anonymous visitors load its real commit history, file
+# tree, and ranked files without opening the analysis endpoints to arbitrary repos,
+# the repo router permits unauthenticated reads ONLY for this owner/repo — every
+# other repo still requires login when Supabase is configured (see
+# services/auth.require_user_or_public_demo). Generation/LLM stays login-gated
+# regardless. Set either value to "" to disable the public-demo bypass entirely.
+DEMO_REPO_OWNER: str = os.getenv("DEMO_REPO_OWNER", "Lakshya565")
+DEMO_REPO_NAME: str = os.getenv("DEMO_REPO_NAME", "RepoFrame")

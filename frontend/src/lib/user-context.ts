@@ -149,6 +149,23 @@ export function hasAnyUserContext(context: UserContext): boolean {
   return Object.values(context).some((value) => value.trim() !== "");
 }
 
+// Returns true when the user has filled in any of THEIR OWN context — the "Your
+// context" fields the repo can't prove. Deliberately EXCLUDES the "RepoFrame's
+// guess" fields (purpose, technicalFocus), which are auto-seeded from free repo
+// analysis and so would otherwise read as "the user has context" the moment
+// seeding lands. This is what the Generate flow uses to decide whether to open on
+// Context (nothing user-supplied yet) or jump to Generate (user has added context).
+export function hasUserFilledContext(context: UserContext): boolean {
+  return (
+    context.targetUser.trim() !== "" ||
+    context.collaboration !== "" ||
+    context.contribution.trim() !== "" ||
+    context.hardestPart.trim() !== "" ||
+    context.impact.trim() !== "" ||
+    context.guardrails.trim() !== ""
+  );
+}
+
 // Returns true when two questionnaire snapshots hold identical answers. Used to
 // decide whether a cached project profile is still valid or must be regenerated
 // because the user changed their context (which grounds every generated output).

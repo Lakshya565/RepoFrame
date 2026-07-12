@@ -8,6 +8,8 @@ import {
   type DetectedTechnology,
   type RepoMetadataResponse,
 } from "@/lib/repo-api";
+import { demoFetchRepoMetadata } from "@/lib/demo-analysis";
+import { useDemo } from "@/lib/demo-mode";
 import { useRepoResource, type RepoResource } from "@/lib/use-repo-resource";
 import { useGeneration } from "@/lib/generation-context";
 import { useTechStack } from "@/lib/tech-stack-context";
@@ -34,7 +36,13 @@ const METADATA_ERROR = "RepoFrame could not fetch repository metadata.";
 // the GitHub-backed detection only runs once. The clickable technology nodes live
 // in their own "Tech stack" section below this card (see TechStackCard).
 export function RepoOverviewCard({ repoUrl }: RepoOverviewCardProps) {
-  const metadata = useRepoResource(repoUrl, fetchRepoMetadata, METADATA_ERROR);
+  // In the signed-out demo, resolve from the frozen fixture instead of GitHub.
+  const demo = useDemo();
+  const metadata = useRepoResource(
+    repoUrl,
+    demo ? demoFetchRepoMetadata : fetchRepoMetadata,
+    METADATA_ERROR,
+  );
   const techStack = useTechStack();
 
   // Lift the loaded metadata into the shared generation state so the auto-save

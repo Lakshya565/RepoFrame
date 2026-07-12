@@ -27,6 +27,8 @@ import {
   type InterviewTopic,
   type OutputSection,
 } from "@/lib/repo-api";
+import { useDemo } from "@/lib/demo-mode";
+import { GateOverlay } from "@/components/gate-overlay";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -798,12 +800,12 @@ function InstructionBox({
   onChange,
   bordered = true,
 }: InstructionBoxProps) {
-  return (
-    <div className={cn(bordered && "mt-5 border-t pt-4")}>
-      <label className="text-sm font-medium" htmlFor={id}>
-        Instructions for the model (optional)
-      </label>
-      <p className="mt-1 text-sm text-muted-foreground">{helper}</p>
+  // In the demo, steering the model with custom instructions is login-gated. The
+  // label stays visible so the visitor sees what unlocking offers; the input itself
+  // sits behind the gate.
+  const demo = useDemo();
+  const control = (
+    <>
       <Textarea
         className="mt-2 resize-y"
         disabled={busy}
@@ -816,6 +818,20 @@ function InstructionBox({
       <div className="mt-1 text-right text-xs text-muted-foreground">
         {value.length}/{INSTRUCTION_MAX_LENGTH}
       </div>
+    </>
+  );
+
+  return (
+    <div className={cn(bordered && "mt-5 border-t pt-4")}>
+      <label className="text-sm font-medium" htmlFor={id}>
+        Instructions for the model (optional)
+      </label>
+      <p className="mt-1 text-sm text-muted-foreground">{helper}</p>
+      {demo ? (
+        <GateOverlay title="Log in to guide the model">{control}</GateOverlay>
+      ) : (
+        control
+      )}
     </div>
   );
 }

@@ -83,6 +83,18 @@ type ApiErrorResponse = {
   detail?: unknown;
 };
 
+// An error carrying the backend HTTP status, so callers can react to specific codes
+// (e.g. auto-retry a 503 "still computing" from GitHub's lazy stats endpoints)
+// rather than only having the message string.
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -157,6 +169,38 @@ export async function fetchCommitActivity(
     { repoUrl, range },
     "RepoFrame could not fetch commit activity.",
   );
+}
+
+// GitHub computes its /stats/* endpoints lazily and returns "still computing" (which
+// the backend surfaces as a retryable 503) on the first hit for a repo — most often
+// for the heavier contributor stats behind the "all" range. So poll: retry the fetch
+// a few times with a short delay before giving up. Because this runs inside the
+// resource fetcher, the card keeps showing its loading state while GitHub finishes,
+// instead of erroring on a condition that resolves within seconds. Non-503 errors
+// (and the final 503) propagate normally to the error state + manual retry.
+const COMMIT_ACTIVITY_RETRY_ATTEMPTS = 4;
+const COMMIT_ACTIVITY_RETRY_DELAY_MS = 2500;
+
+export async function fetchCommitActivityPolling(
+  repoUrl: string,
+  range: CommitActivityRange,
+): Promise<CommitActivityResponse> {
+  for (let attempt = 0; attempt < COMMIT_ACTIVITY_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      return await fetchCommitActivity(repoUrl, range);
+    } catch (caught) {
+      const stillComputing = caught instanceof ApiError && caught.status === 503;
+      const attemptsLeft = attempt < COMMIT_ACTIVITY_RETRY_ATTEMPTS - 1;
+      if (!stillComputing || !attemptsLeft) {
+        throw caught;
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, COMMIT_ACTIVITY_RETRY_DELAY_MS),
+      );
+    }
+  }
+  // Unreachable — the loop always returns or throws — but keeps the return type sound.
+  return fetchCommitActivity(repoUrl, range);
 }
 
 // Fetches the recursive repository tree for the structure panel. The backend
@@ -610,7 +654,10 @@ async function parseResponse<T>(
       () => ({}),
     )) as ApiErrorResponse;
 
-    throw new Error(getApiErrorMessage(errorBody, fallbackMessage));
+    throw new ApiError(
+      getApiErrorMessage(errorBody, fallbackMessage),
+      response.status,
+    );
   }
 
   return (await response.json()) as T;

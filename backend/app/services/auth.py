@@ -3,11 +3,12 @@ import threading
 from dataclasses import dataclass
 
 import jwt
-from fastapi import Header, HTTPException
+from fastapi import Header, HTTPException, Request
 from jwt import PyJWKClient
 
 from app import config
 from app.services import supabase_client
+from app.services.repo_parser import RepoUrlParseError, parse_github_repo_url
 
 # Verifies Supabase-issued access tokens and turns a valid one into an identified
 # user. This is the trust boundary for every authenticated endpoint: a request is
@@ -209,6 +210,57 @@ def require_user_when_configured(
     if not supabase_client.is_configured():
         return None
     return require_user(authorization)
+
+
+async def _request_targets_demo_repo(request: Request) -> bool:
+    """True when the request body's repoUrl is the configured public demo repo.
+
+    Reads the JSON body once; Starlette caches it, so the route still parses its own
+    request model afterward. Any missing/non-JSON body, absent repoUrl, or a repo
+    other than config.DEMO_REPO_* yields False — meaning the normal login gate
+    applies. The comparison is case-insensitive on owner/repo.
+    """
+    if not config.DEMO_REPO_OWNER or not config.DEMO_REPO_NAME:
+        return False
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001 - a non-JSON body is never the demo path
+        return False
+    repo_url = body.get("repoUrl") if isinstance(body, dict) else None
+    if not isinstance(repo_url, str) or not repo_url:
+        return False
+    try:
+        parsed = parse_github_repo_url(repo_url)
+    except RepoUrlParseError:
+        return False
+    return (
+        parsed.owner.lower() == config.DEMO_REPO_OWNER.lower()
+        and parsed.repo.lower() == config.DEMO_REPO_NAME.lower()
+    )
+
+
+async def require_user_or_public_demo(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> AuthenticatedUser | None:
+    """Login gate that ALSO allows anonymous reads of the one public demo repo.
+
+    Identical to require_user_when_configured, except that when Supabase is
+    configured and the caller is anonymous, the request is still permitted IF it
+    targets the configured public demo repository (config.DEMO_REPO_*). This lets the
+    signed-out product demo load real, live analysis data for that single public repo
+    — commit history, file tree, ranked files — without exposing the analysis
+    endpoints for arbitrary repos. Returns the verified user when present, otherwise
+    None (anonymous but permitted). A non-demo anonymous request still gets a 401.
+    """
+    user = get_current_user(authorization)
+    if user is not None:
+        return user
+    if not supabase_client.is_configured():
+        return None
+    if await _request_targets_demo_repo(request):
+        return None
+    raise HTTPException(status_code=401, detail=UNAUTHENTICATED_MESSAGE)
 
 
 def reset_jwks_client() -> None:

@@ -8,10 +8,12 @@ import { ArrowRight, Loader2 } from "lucide-react";
 import { parseRepoUrl } from "@/lib/repo-api";
 import { useAuth } from "@/lib/auth-context";
 import { isDemoActive } from "@/lib/demo-fixture";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { GithubMark } from "@/components/github-mark";
+import { HoverPopIcon } from "@/components/hover-pop-icon";
 import { Input } from "@/components/ui/input";
 import { GlowText } from "@/components/glow-text";
+import { cn } from "@/lib/utils";
 
 // Handles the initial repo URL entry flow. It sends raw user input to the backend
 // parser, then routes with only normalized owner/repo/url values. Validation and
@@ -78,10 +80,15 @@ export function RepoUrlForm() {
           </Button>
           <Link
             href="/demo"
-            className="inline-flex h-11 items-center justify-center rounded-md px-5 text-sm font-medium text-muted-foreground transition-colors hover:text-brand"
+            className={cn(
+              buttonVariants({ variant: "outline" }),
+              "group h-11 gap-0 px-5",
+            )}
           >
             View the demo
-            <ArrowRight className="ml-1 size-4" />
+            <HoverPopIcon side="end">
+              <ArrowRight />
+            </HoverPopIcon>
           </Link>
         </div>
       </div>
