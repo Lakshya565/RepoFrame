@@ -1,3 +1,5 @@
+import { Sparkles } from "lucide-react";
+
 import { RepoOverviewCard } from "@/components/repo-overview-card";
 import { TechStackCard } from "@/components/tech-stack-card";
 import { RepoCommitTimeline } from "@/components/repo-commit-timeline";
@@ -15,6 +17,18 @@ const repoUrl = DEMO_REPO_URL;
 export default function DemoAnalysisPage() {
   return (
     <div className="space-y-6">
+      {/* A quiet note that this is the real thing, run on RepoFrame's own repo. */}
+      <div className="flex items-start gap-3 rounded-lg border border-brand/30 bg-brand/5 p-4">
+        <Sparkles className="mt-0.5 size-4 shrink-0 text-brand" aria-hidden />
+        <p className="text-sm leading-6 text-muted-foreground">
+          <span className="font-medium text-foreground">
+            You&apos;re exploring a live demo.
+          </span>{" "}
+          This is a real analysis of RepoFrame&apos;s own repository, the
+          project this site was built from, so everything you see is genuine.
+        </p>
+      </div>
+
       <TechStackProvider repoUrl={repoUrl}>
         <ScrollReveal index={0}>
           <RepoOverviewCard repoUrl={repoUrl} />
