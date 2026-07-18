@@ -14,6 +14,7 @@ import {
 import { UserContextForm } from "@/components/user-context-form";
 import {
   INSTRUCTION_MAX_LENGTH,
+  applyEdit,
   mergeSection,
   sectionHasContent,
   sectionToText,
@@ -102,6 +103,10 @@ export function ProjectWriteupSection({
     setVerifications,
     baselines,
     setBaselines,
+    sectionRevert,
+    setSectionRevert,
+    interviewRevert,
+    setInterviewRevert,
     allGuidance,
     setAllGuidance,
     guessesSeeded,
@@ -228,6 +233,10 @@ export function ProjectWriteupSection({
     }
     setBusyTask({ kind: "all" });
     setError(null);
+    // A bulk regenerate redefines every card, so the per-card revert history no
+    // longer refers to anything meaningful — clear it.
+    setSectionRevert({});
+    setInterviewRevert(null);
 
     try {
       const profileResponse = demo
@@ -303,15 +312,21 @@ export function ProjectWriteupSection({
     }
     setBusyTask({ kind: "revise", section });
     setError(null);
+    // Stash the pre-regenerate text so the card can revert/redo between the last
+    // two generations (reverted:false = currently showing the new one).
+    const beforeText = sectionToText(outputs, section);
 
     try {
       const activeProfile = await ensureProfile();
-      const currentText = sectionToText(outputs, section);
       const response = demo
         ? await demoGenerateOutputs()
-        : await reviseOutput(activeProfile, section, currentText, instruction);
+        : await reviseOutput(activeProfile, section, beforeText, instruction);
       setOutputs((current) => mergeSection(current, section, response.outputs));
       setBaseline(response.outputs, section);
+      setSectionRevert((current) => ({
+        ...current,
+        [section]: { text: beforeText, reverted: false },
+      }));
       addUsage(response.usage);
       return true;
     } catch (caught) {
@@ -321,6 +336,24 @@ export function ProjectWriteupSection({
       setBusyTask(null);
       refreshLifetime();
     }
+  }
+
+  // Toggle a section between its last two generations. Swaps the visible text with
+  // the cached "other" version and flips the reverted flag (so the button reads
+  // Revert ⇄ Redo). Instant — no API call. The reverted text becomes the edit
+  // baseline so the card isn't flagged as manually edited.
+  function handleRevertSection(section: OutputSection) {
+    const entry = sectionRevert[section];
+    if (!entry || busyTask) {
+      return;
+    }
+    const currentText = sectionToText(outputs, section);
+    setOutputs((current) => applyEdit(current, section, entry.text));
+    setBaselines((current) => ({ ...current, [section]: entry.text }));
+    setSectionRevert((current) => ({
+      ...current,
+      [section]: { text: currentText, reverted: !entry.reverted },
+    }));
   }
 
   // Generates interview prep on its own, with optional preemptive guidance.
@@ -355,13 +388,16 @@ export function ProjectWriteupSection({
     }
     setBusyTask({ kind: "interview" });
     setError(null);
+    // Stash the pre-regenerate topics for revert/redo.
+    const beforeTopics = interviewTopics;
 
     try {
       const activeProfile = await ensureProfile();
       const response = demo
         ? await demoGenerateInterview()
-        : await reviseInterviewPrep(activeProfile, interviewTopics, instruction);
+        : await reviseInterviewPrep(activeProfile, beforeTopics, instruction);
       setInterviewTopics(response.topics);
+      setInterviewRevert({ topics: beforeTopics, reverted: false });
       addUsage(response.usage);
     } catch (caught) {
       setError(messageOf(caught, "RepoFrame could not regenerate interview prep."));
@@ -369,6 +405,16 @@ export function ProjectWriteupSection({
       setBusyTask(null);
       refreshLifetime();
     }
+  }
+
+  // Toggle interview prep between its last two generations (see handleRevertSection).
+  function handleRevertInterview() {
+    if (!interviewRevert || busyTask) {
+      return;
+    }
+    const current = interviewTopics ?? [];
+    setInterviewTopics(interviewRevert.topics);
+    setInterviewRevert({ topics: current, reverted: !interviewRevert.reverted });
   }
 
   // Runs the bounded verification agent over every generated output. Opt-in: it
@@ -461,14 +507,18 @@ export function ProjectWriteupSection({
               busy={busy}
               generatingInterview={busyTask?.kind === "interview"}
               generatingSection={generatingSection}
+              interviewRevert={interviewRevert}
               interviewTopics={interviewTopics}
               onGenerateInterview={handleGenerateInterview}
               onGenerateSection={handleGenerateSection}
               onOutputsChange={setOutputs}
               onReviseInterview={handleReviseInterview}
               onReviseSection={handleReviseSection}
+              onRevertInterview={handleRevertInterview}
+              onRevertSection={handleRevertSection}
               outputs={outputs}
               revisingSection={revisingSection}
+              sectionRevert={sectionRevert}
             />
 
             <VerificationAgent

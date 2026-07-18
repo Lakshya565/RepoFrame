@@ -10,6 +10,8 @@ import {
   type CommitActivityRange,
   type CommitActivityResponse,
 } from "@/lib/repo-api";
+import { demoFetchCommitActivity } from "@/lib/demo-analysis";
+import { useDemo } from "@/lib/demo-mode";
 import { useRepoResource, type RepoResource } from "@/lib/use-repo-resource";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -59,15 +61,20 @@ const numberFormatter = new Intl.NumberFormat("en-US");
 // across every state so the page does not shift as it resolves.
 export function RepoCommitTimeline({ repoUrl }: RepoCommitTimelineProps) {
   const [range, setRange] = useState<CommitActivityRange>("month");
+  const demo = useDemo();
 
   // A range-scoped fetcher: changing the range gives useRepoResource a new fetcher,
   // which re-runs the request for that window. Uses the polling variant so the "all"
   // range (heavier contributor stats) rides out GitHub's "still computing" 503
   // instead of erroring — the card stays in its loading state until it resolves. The
-  // signed-out demo hits this live too (the public demo repo is allowed unauthed).
+  // signed-out demo serves a frozen snapshot instead: GitHub's stats endpoints are
+  // slow (especially "all"), so the demo doesn't pay that latency on every visit.
   const fetcher = useCallback(
-    (url: string) => fetchCommitActivityPolling(url, range),
-    [range],
+    (url: string) =>
+      demo
+        ? demoFetchCommitActivity(url, range)
+        : fetchCommitActivityPolling(url, range),
+    [range, demo],
   );
   const activity = useRepoResource(repoUrl, fetcher, COMMIT_ACTIVITY_ERROR);
 

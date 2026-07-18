@@ -42,6 +42,17 @@ export type GenerationTask =
   // section null = verify every tab; a section = re-check just that tab.
   | { kind: "verify"; section: OutputSection | null };
 
+// The revert/redo swap cache for one card: the "other" generation the user can
+// toggle to, plus whether the reverted (older) version is currently shown (so the
+// button reads "Redo"). Session-only — never part of a saved snapshot.
+export type SectionRevertMap = Partial<
+  Record<OutputSection, { text: string; reverted: boolean }>
+>;
+export type InterviewRevert = {
+  topics: InterviewTopic[];
+  reverted: boolean;
+} | null;
+
 // The empty per-session token meter, shared by the developer panel and every
 // generation call.
 const EMPTY_USAGE_TOTALS: UsageTotals = {
@@ -86,6 +97,13 @@ type GenerationContextValue = {
   // edited (which enables the feedback regenerate).
   baselines: Partial<Record<OutputSection, string>>;
   setBaselines: Dispatch<SetStateAction<Partial<Record<OutputSection, string>>>>;
+  // Revert/redo swap cache. A regenerate stashes the prior version here so the card
+  // can toggle between the last two generations; a bulk "Generate everything" and a
+  // reopen clear it. Session-only (excluded from the saved snapshot).
+  sectionRevert: SectionRevertMap;
+  setSectionRevert: Dispatch<SetStateAction<SectionRevertMap>>;
+  interviewRevert: InterviewRevert;
+  setInterviewRevert: Dispatch<SetStateAction<InterviewRevert>>;
   // Preemptive instruction applied to everything produced by "Generate all".
   allGuidance: string;
   setAllGuidance: Dispatch<SetStateAction<string>>;
@@ -142,6 +160,8 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
   const [baselines, setBaselines] = useState<
     Partial<Record<OutputSection, string>>
   >({});
+  const [sectionRevert, setSectionRevert] = useState<SectionRevertMap>({});
+  const [interviewRevert, setInterviewRevert] = useState<InterviewRevert>(null);
   const [allGuidance, setAllGuidance] = useState("");
   const [guessesSeeded, setGuessesSeeded] = useState(false);
   const [busyTask, setBusyTask] = useState<GenerationTask | null>(null);
@@ -170,6 +190,8 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
     setInterviewTopics(snapshot.interviewTopics);
     setVerifications(snapshot.verifications);
     setBaselines({});
+    setSectionRevert({});
+    setInterviewRevert(null);
     setAllGuidance(snapshot.allGuidance);
     setGuessesSeeded(true);
     setRepoMetadata(snapshot.metadata);
@@ -204,6 +226,10 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
     setVerifications,
     baselines,
     setBaselines,
+    sectionRevert,
+    setSectionRevert,
+    interviewRevert,
+    setInterviewRevert,
     allGuidance,
     setAllGuidance,
     guessesSeeded,

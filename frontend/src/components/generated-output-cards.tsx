@@ -13,6 +13,8 @@ import {
   MessagesSquare,
   Pencil,
   Plus,
+  Redo2,
+  Undo2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -29,6 +31,10 @@ import {
 } from "@/lib/repo-api";
 import { useDemo } from "@/lib/demo-mode";
 import { useCompletionFlash } from "@/lib/use-completion-flash";
+import {
+  type InterviewRevert,
+  type SectionRevertMap,
+} from "@/lib/generation-context";
 import { GateOverlay } from "@/components/gate-overlay";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -130,6 +136,12 @@ type GeneratedOutputCardsProps = {
   // Revise the existing interview prep using the instruction as feedback (the
   // interview card's Regenerate, backed by the interview-prep/revise endpoint).
   onReviseInterview: (instruction: string) => Promise<void> | void;
+  // Revert/redo swap cache + togglers (one level of undo/redo per card, populated
+  // by a regenerate). A card's entry is undefined until it has been regenerated.
+  sectionRevert: SectionRevertMap;
+  onRevertSection: (section: OutputSection) => void;
+  interviewRevert: InterviewRevert;
+  onRevertInterview: () => void;
 };
 
 // The generated outputs as a master–detail workspace: a left rail lists every
@@ -153,6 +165,10 @@ export function GeneratedOutputCards({
   onReviseSection,
   onGenerateInterview,
   onReviseInterview,
+  sectionRevert,
+  onRevertSection,
+  interviewRevert,
+  onRevertInterview,
 }: GeneratedOutputCardsProps) {
   // Land on the first output that already has content (so a returning user whose
   // work survived tab navigation sees it immediately), else interview prep, else
@@ -206,8 +222,10 @@ export function GeneratedOutputCards({
               icon={card.icon}
               onGenerateSection={onGenerateSection}
               onOutputsChange={onOutputsChange}
+              onRevertSection={onRevertSection}
               onReviseSection={onReviseSection}
               outputs={outputs}
+              revert={sectionRevert[card.section]}
               revisingSection={revisingSection}
               section={card.section}
               status={statuses[card.section]}
@@ -223,6 +241,8 @@ export function GeneratedOutputCards({
             interviewTopics={interviewTopics}
             onGenerateInterview={onGenerateInterview}
             onReviseInterview={onReviseInterview}
+            onRevert={onRevertInterview}
+            revert={interviewRevert}
             status={statuses[INTERVIEW_KEY]}
           />
         </div>
@@ -357,6 +377,9 @@ type PanelShellProps = {
   title: string;
   helper: string;
   status: PanelStatus;
+  // Attached to the in-card overlay that blooms when a generation finishes (see
+  // useCompletionFlash). The card is overflow-hidden, so the bloom is clipped to it.
+  flashRef?: React.Ref<HTMLSpanElement>;
   children: React.ReactNode;
 };
 
@@ -371,10 +394,17 @@ function PanelShell({
   title,
   helper,
   status,
+  flashRef,
   children,
 }: PanelShellProps) {
   return (
-    <Card beam className="flex h-full flex-col overflow-hidden p-0">
+    <Card beam className="relative flex h-full flex-col overflow-hidden p-0">
+      {/* Generation-done bloom: idle (opacity 0) until the flash hook animates it. */}
+      <span
+        ref={flashRef}
+        aria-hidden
+        className="card-done-overlay pointer-events-none absolute inset-0 z-10"
+      />
       <div className="flex items-center gap-4 border-b p-5">
         <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-brand/25 bg-brand/10 text-brand">
           <Icon className="size-5" />
@@ -403,6 +433,8 @@ type OutputPanelProps = {
   busy: boolean;
   generatingSection: OutputSection | null;
   revisingSection: OutputSection | null;
+  // The section's revert cache entry (undefined until it has been regenerated).
+  revert?: { reverted: boolean };
   onOutputsChange: (next: GeneratedOutputs) => void;
   onGenerateSection: (
     section: OutputSection,
@@ -412,6 +444,7 @@ type OutputPanelProps = {
     section: OutputSection,
     instruction: string,
   ) => Promise<boolean>;
+  onRevertSection: (section: OutputSection) => void;
 };
 
 // One output's detail panel. Body reads top-to-bottom: the generated text (or the
@@ -430,9 +463,11 @@ function OutputPanel({
   busy,
   generatingSection,
   revisingSection,
+  revert,
   onOutputsChange,
   onGenerateSection,
   onReviseSection,
+  onRevertSection,
 }: OutputPanelProps) {
   const [isEditing, setIsEditing] = useState(false);
   // While editing, the textarea is driven by this raw draft so resume bullets can
@@ -450,7 +485,7 @@ function OutputPanel({
 
   // Pulse the card when a generate/regenerate for THIS section finishes, so the
   // eye is drawn back to the fresh result.
-  const flashRef = useCompletionFlash<HTMLDivElement>(
+  const flashRef = useCompletionFlash<HTMLSpanElement>(
     isGeneratingThis || isRevisingThis,
   );
 
@@ -499,24 +534,33 @@ function OutputPanel({
   // (with the always-visible instruction box) only appears once there is content.
   if (!hasContent) {
     return (
-      <div ref={flashRef} className="h-full rounded-lg">
-        <PanelShell helper={helper} icon={icon} status={status} title={title}>
-          <EmptyPanelState
-            busy={busy}
-            generating={isGeneratingThis}
-            instruction={instruction}
-            instructionId={`instructions-${section}`}
-            onGenerate={handleGenerate}
-            onInstructionChange={setInstruction}
-          />
-        </PanelShell>
-      </div>
+      <PanelShell
+        flashRef={flashRef}
+        helper={helper}
+        icon={icon}
+        status={status}
+        title={title}
+      >
+        <EmptyPanelState
+          busy={busy}
+          generating={isGeneratingThis}
+          instruction={instruction}
+          instructionId={`instructions-${section}`}
+          onGenerate={handleGenerate}
+          onInstructionChange={setInstruction}
+        />
+      </PanelShell>
     );
   }
 
   return (
-    <div ref={flashRef} className="h-full rounded-lg">
-      <PanelShell helper={helper} icon={icon} status={status} title={title}>
+    <PanelShell
+      flashRef={flashRef}
+      helper={helper}
+      icon={icon}
+      status={status}
+      title={title}
+    >
       {/* 1. The generated text (or the edit textarea). */}
       {isEditing ? (
         <Textarea
@@ -560,7 +604,7 @@ function OutputPanel({
         feedback.
       </p>
 
-      <div className="mt-2">
+      <div className="mt-2 flex flex-wrap gap-2">
         <Button
           variant="outline"
           size="sm"
@@ -576,9 +620,43 @@ function OutputPanel({
             "Regenerate"
           )}
         </Button>
+        <RevertButton
+          busy={busy}
+          revert={revert}
+          onClick={() => onRevertSection(section)}
+        />
       </div>
-      </PanelShell>
-    </div>
+    </PanelShell>
+  );
+}
+
+// The revert/redo toggle shown beside a card's Regenerate. Greyed out until the
+// card has been regenerated at least once (no cached version to swap to); then it
+// swaps between the last two generations, reading "Revert" or "Redo" depending on
+// which one is currently shown. Instant — the swap is a cached state change.
+function RevertButton({
+  revert,
+  busy,
+  onClick,
+}: {
+  revert?: { reverted: boolean } | null;
+  busy: boolean;
+  onClick: () => void;
+}) {
+  const isRedo = revert?.reverted ?? false;
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      disabled={busy || !revert}
+      onClick={onClick}
+      title={
+        revert ? undefined : "Regenerate first to enable revert"
+      }
+    >
+      {isRedo ? <Redo2 /> : <Undo2 />}
+      {isRedo ? "Redo" : "Revert"}
+    </Button>
   );
 }
 
@@ -587,8 +665,10 @@ type InterviewPanelProps = {
   status: PanelStatus;
   busy: boolean;
   generatingInterview: boolean;
+  revert: InterviewRevert;
   onGenerateInterview: (guidance: string) => Promise<void> | void;
   onReviseInterview: (instruction: string) => Promise<void> | void;
+  onRevert: () => void;
 };
 
 // Interview prep as its own detail panel, matching the other cards: content, Copy,
@@ -602,8 +682,10 @@ function InterviewPanel({
   status,
   busy,
   generatingInterview,
+  revert,
   onGenerateInterview,
   onReviseInterview,
+  onRevert,
 }: InterviewPanelProps) {
   const [copied, setCopied] = useState(false);
   const [instruction, setInstruction] = useState("");
@@ -612,7 +694,7 @@ function InterviewPanel({
   const hasTopics = interviewTopics !== null;
 
   // Pulse the card when interview prep finishes generating/regenerating.
-  const flashRef = useCompletionFlash<HTMLDivElement>(generatingInterview);
+  const flashRef = useCompletionFlash<HTMLSpanElement>(generatingInterview);
 
   async function handleCopy() {
     try {
@@ -628,34 +710,33 @@ function InterviewPanel({
   // empty interview card matches the sidebar height too.
   if (!hasTopics) {
     return (
-      <div ref={flashRef} className="h-full rounded-lg">
-        <PanelShell
-          helper="Likely questions about this project with talking points to rehearse."
-          icon={MessagesSquare}
-          status={status}
-          title="Interview prep"
-        >
-          <EmptyPanelState
-            busy={busy}
-            generating={generatingInterview}
-            instruction={instruction}
-            instructionId="instructions-interview"
-            onGenerate={() => onGenerateInterview(instruction.trim())}
-            onInstructionChange={setInstruction}
-          />
-        </PanelShell>
-      </div>
-    );
-  }
-
-  return (
-    <div ref={flashRef} className="h-full rounded-lg">
       <PanelShell
+        flashRef={flashRef}
         helper="Likely questions about this project with talking points to rehearse."
         icon={MessagesSquare}
         status={status}
         title="Interview prep"
       >
+        <EmptyPanelState
+          busy={busy}
+          generating={generatingInterview}
+          instruction={instruction}
+          instructionId="instructions-interview"
+          onGenerate={() => onGenerateInterview(instruction.trim())}
+          onInstructionChange={setInstruction}
+        />
+      </PanelShell>
+    );
+  }
+
+  return (
+    <PanelShell
+      flashRef={flashRef}
+      helper="Likely questions about this project with talking points to rehearse."
+      icon={MessagesSquare}
+      status={status}
+      title="Interview prep"
+    >
       {/* 1. The generated topics. */}
       {topics.length > 0 ? (
         <div className="space-y-3">
@@ -706,7 +787,7 @@ function InterviewPanel({
         feedback.
       </p>
 
-      <div className="mt-2">
+      <div className="mt-2 flex flex-wrap gap-2">
         <Button
           variant="outline"
           size="sm"
@@ -722,9 +803,9 @@ function InterviewPanel({
             "Regenerate"
           )}
         </Button>
+        <RevertButton busy={busy} revert={revert} onClick={onRevert} />
       </div>
-      </PanelShell>
-    </div>
+    </PanelShell>
   );
 }
 

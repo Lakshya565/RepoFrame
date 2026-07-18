@@ -3,12 +3,14 @@
 import { useEffect, useRef } from "react";
 import { useReducedMotion } from "motion/react";
 
-// The class that runs the one-shot pulse keyframe (see globals.css).
-const FLASH_CLASS = "animate-card-done";
+// The class that runs the one-shot radial-bloom keyframe (see globals.css). It's
+// added to a `.card-done-overlay` element sitting inside the card.
+const FLASH_CLASS = "animate-card-done-radial";
 
-// Plays a one-shot "generation done" pulse on the returned ref's element whenever
-// `active` transitions from true to false — i.e. a generation/regeneration that was
-// running has just finished — so the user's eye is drawn back to the fresh result.
+// Plays a one-shot "generation done" bloom on the returned ref's overlay element
+// whenever `active` transitions from true to false — i.e. a generation/regeneration
+// that was running has just finished — so the user's eye is drawn back to the fresh
+// result.
 //
 // It toggles a CSS class on the DOM node directly (theme-aware via var(--brand))
 // rather than setting React state, so it never causes a re-render, and self-clears
