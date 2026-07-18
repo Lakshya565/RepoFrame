@@ -1,6 +1,7 @@
 import { SiteHeader } from "@/components/site-header";
 import { BrandMarqueeRails } from "@/components/brand-marquee";
 import { RepoUrlForm } from "@/components/repo-url-form";
+import { LandingRecentProjects } from "@/components/landing-recent-projects";
 import { Reveal, GrowLine } from "@/components/motion/reveal";
 import { KineticLetters } from "@/components/kinetic-letters";
 import { GlowText } from "@/components/glow-text";
@@ -144,6 +145,11 @@ export default function Home() {
               </div>
             </MagicCard>
           </Reveal>
+
+          {/* Signed-in shortcut: jump straight back into a saved analysis instead
+              of analyzing a throwaway repo to reach History. Renders nothing when
+              signed out / no saved work, so the signed-out landing is unchanged. */}
+          <LandingRecentProjects />
         </section>
       </div>
     </main>

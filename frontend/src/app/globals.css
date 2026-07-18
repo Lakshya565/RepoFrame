@@ -198,6 +198,36 @@
   }
 }
 
+/*
+  Output-card "generation done" cue. When a card finishes generating or
+  regenerating (generated-output-cards.tsx via use-completion-flash.ts), a
+  brand-green ring blooms out from the card edge and fades, pulling the eye back to
+  the fresh result. One shot, ~1s; the hook adds `.animate-card-done` on the
+  falling edge of "busy" and removes it on animationend, and skips it entirely
+  under prefers-reduced-motion.
+*/
+@keyframes card-done-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 50%, transparent);
+  }
+  35% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--brand) 32%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 12px color-mix(in srgb, var(--brand) 0%, transparent);
+  }
+}
+
+.animate-card-done {
+  animation: card-done-pulse 1s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-card-done {
+    animation: none;
+  }
+}
+
 /* Base element defaults: token-driven border color and page background/text. */
 @layer base {
   * {

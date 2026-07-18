@@ -21,13 +21,25 @@ function easeOutCubic(t: number): number {
   return 1 - Math.pow(1 - t, 3)
 }
 
+// Vendored Magic UI 3D icon cloud, with two performance fixes over the upstream
+// component (RepoFrame perf pass):
+//   1. All pointer/drag interaction state lives in REFS, not React state. The
+//      original called setMousePos() on every mouse-move and listed it in the
+//      render loop's effect deps, so each move re-rendered the component AND tore
+//      down + recreated the requestAnimationFrame loop — a churn storm that fought
+//      the scroll thread. Refs keep the render loop mounted once and silent.
+//   2. The rAF loop PAUSES when the canvas scrolls off-screen (Intersection
+//      Observer) instead of redrawing forever, so it costs nothing when unseen.
 export function IconCloud({ icons, images }: IconCloudProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [iconPositions, setIconPositions] = useState<Icon[]>([])
-  const [isDragging, setIsDragging] = useState(false)
-  const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 })
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 })
-  const [targetRotation, setTargetRotation] = useState<{
+
+  // Interaction state as refs so mouse moves never trigger a React render or
+  // restart the animation effect (see the note above).
+  const isDraggingRef = useRef(false)
+  const lastMousePosRef = useRef({ x: 0, y: 0 })
+  const mousePosRef = useRef({ x: 0, y: 0 })
+  const targetRotationRef = useRef<{
     x: number
     y: number
     startX: number
@@ -36,7 +48,6 @@ export function IconCloud({ icons, images }: IconCloudProps) {
     startTime: number
     duration: number
   } | null>(null)
-  const animationFrameRef = useRef<number>(0)
   const rotationRef = useRef({ x: 0, y: 0 })
   const iconCanvasesRef = useRef<HTMLCanvasElement[]>([])
   const imagesLoadedRef = useRef<boolean[]>([])
@@ -126,7 +137,7 @@ export function IconCloud({ icons, images }: IconCloudProps) {
     setIconPositions(newIcons)
   }, [icons, images])
 
-  // Handle mouse events
+  // Handle mouse events. These only touch refs, so they never re-render.
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current?.getBoundingClientRect()
     if (!rect || !canvasRef.current) return
@@ -170,7 +181,7 @@ export function IconCloud({ icons, images }: IconCloudProps) {
 
         const duration = Math.min(2000, Math.max(800, distance * 1000))
 
-        setTargetRotation({
+        targetRotationRef.current = {
           x: targetX,
           y: targetY,
           startX: currentX,
@@ -178,136 +189,155 @@ export function IconCloud({ icons, images }: IconCloudProps) {
           distance,
           startTime: performance.now(),
           duration,
-        })
+        }
         return
       }
     })
 
-    setIsDragging(true)
-    setLastMousePos({ x: e.clientX, y: e.clientY })
+    isDraggingRef.current = true
+    lastMousePosRef.current = { x: e.clientX, y: e.clientY }
   }
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current?.getBoundingClientRect()
     if (rect) {
-      const x = e.clientX - rect.left
-      const y = e.clientY - rect.top
-      setMousePos({ x, y })
+      mousePosRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top }
     }
 
-    if (isDragging) {
-      const deltaX = e.clientX - lastMousePos.x
-      const deltaY = e.clientY - lastMousePos.y
+    if (isDraggingRef.current) {
+      const deltaX = e.clientX - lastMousePosRef.current.x
+      const deltaY = e.clientY - lastMousePosRef.current.y
 
       rotationRef.current = {
         x: rotationRef.current.x + deltaY * 0.002,
         y: rotationRef.current.y + deltaX * 0.002,
       }
 
-      setLastMousePos({ x: e.clientX, y: e.clientY })
+      lastMousePosRef.current = { x: e.clientX, y: e.clientY }
     }
   }
 
   const handleMouseUp = () => {
-    setIsDragging(false)
+    isDraggingRef.current = false
   }
 
-  // Animation and rendering
+  // Animation and rendering. Set up once per icon layout; reads all interaction
+  // state from refs, and starts/stops with on-screen visibility.
   useEffect(() => {
     const canvas = canvasRef.current
     const ctx = canvas?.getContext("2d")
-    if (canvas && ctx) {
-      const animate = () => {
-        ctx.clearRect(0, 0, canvas.width, canvas.height)
+    if (!canvas || !ctx) return
 
-        const centerX = canvas.width / 2
-        const centerY = canvas.height / 2
-        const maxDistance = Math.sqrt(centerX * centerX + centerY * centerY)
-        const dx = mousePos.x - centerX
-        const dy = mousePos.y - centerY
-        const distance = Math.sqrt(dx * dx + dy * dy)
-        const speed = 0.003 + (distance / maxDistance) * 0.01
+    let rafId = 0
+    let running = false
 
-        if (targetRotation) {
-          const elapsed = performance.now() - targetRotation.startTime
-          const progress = Math.min(1, elapsed / targetRotation.duration)
-          const easedProgress = easeOutCubic(progress)
+    const animate = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-          rotationRef.current = {
-            x:
-              targetRotation.startX +
-              (targetRotation.x - targetRotation.startX) * easedProgress,
-            y:
-              targetRotation.startY +
-              (targetRotation.y - targetRotation.startY) * easedProgress,
-          }
+      const centerX = canvas.width / 2
+      const centerY = canvas.height / 2
+      const maxDistance = Math.sqrt(centerX * centerX + centerY * centerY)
+      const mousePos = mousePosRef.current
+      const dx = mousePos.x - centerX
+      const dy = mousePos.y - centerY
+      const distance = Math.sqrt(dx * dx + dy * dy)
+      const speed = 0.003 + (distance / maxDistance) * 0.01
 
-          if (progress >= 1) {
-            setTargetRotation(null)
-          }
-        } else if (!isDragging) {
-          rotationRef.current = {
-            x: rotationRef.current.x + (dy / canvas.height) * speed,
-            y: rotationRef.current.y + (dx / canvas.width) * speed,
-          }
+      const targetRotation = targetRotationRef.current
+      if (targetRotation) {
+        const elapsed = performance.now() - targetRotation.startTime
+        const progress = Math.min(1, elapsed / targetRotation.duration)
+        const easedProgress = easeOutCubic(progress)
+
+        rotationRef.current = {
+          x:
+            targetRotation.startX +
+            (targetRotation.x - targetRotation.startX) * easedProgress,
+          y:
+            targetRotation.startY +
+            (targetRotation.y - targetRotation.startY) * easedProgress,
         }
 
-        iconPositions.forEach((icon, index) => {
-          const cosX = Math.cos(rotationRef.current.x)
-          const sinX = Math.sin(rotationRef.current.x)
-          const cosY = Math.cos(rotationRef.current.y)
-          const sinY = Math.sin(rotationRef.current.y)
-
-          const rotatedX = icon.x * cosY - icon.z * sinY
-          const rotatedZ = icon.x * sinY + icon.z * cosY
-          const rotatedY = icon.y * cosX + rotatedZ * sinX
-
-          const scale = (rotatedZ + 200) / 300
-          const opacity = Math.max(0.2, Math.min(1, (rotatedZ + 150) / 200))
-
-          ctx.save()
-          ctx.translate(
-            canvas.width / 2 + rotatedX,
-            canvas.height / 2 + rotatedY
-          )
-          ctx.scale(scale, scale)
-          ctx.globalAlpha = opacity
-
-          if (icons || images) {
-            // Only try to render icons/images if they exist
-            if (
-              iconCanvasesRef.current[index] &&
-              imagesLoadedRef.current[index]
-            ) {
-              ctx.drawImage(iconCanvasesRef.current[index], -20, -20, 40, 40)
-            }
-          } else {
-            // Show numbered circles if no icons/images are provided
-            ctx.beginPath()
-            ctx.arc(0, 0, 20, 0, Math.PI * 2)
-            ctx.fillStyle = "#4444ff"
-            ctx.fill()
-            ctx.fillStyle = "white"
-            ctx.textAlign = "center"
-            ctx.textBaseline = "middle"
-            ctx.font = "16px Arial"
-            ctx.fillText(`${icon.id + 1}`, 0, 0)
-          }
-
-          ctx.restore()
-        })
-        animationFrameRef.current = requestAnimationFrame(animate)
+        if (progress >= 1) {
+          targetRotationRef.current = null
+        }
+      } else if (!isDraggingRef.current) {
+        rotationRef.current = {
+          x: rotationRef.current.x + (dy / canvas.height) * speed,
+          y: rotationRef.current.y + (dx / canvas.width) * speed,
+        }
       }
 
-      animate()
+      iconPositions.forEach((icon, index) => {
+        const cosX = Math.cos(rotationRef.current.x)
+        const sinX = Math.sin(rotationRef.current.x)
+        const cosY = Math.cos(rotationRef.current.y)
+        const sinY = Math.sin(rotationRef.current.y)
+
+        const rotatedX = icon.x * cosY - icon.z * sinY
+        const rotatedZ = icon.x * sinY + icon.z * cosY
+        const rotatedY = icon.y * cosX + rotatedZ * sinX
+
+        const scale = (rotatedZ + 200) / 300
+        const opacity = Math.max(0.2, Math.min(1, (rotatedZ + 150) / 200))
+
+        ctx.save()
+        ctx.translate(canvas.width / 2 + rotatedX, canvas.height / 2 + rotatedY)
+        ctx.scale(scale, scale)
+        ctx.globalAlpha = opacity
+
+        if (icons || images) {
+          // Only try to render icons/images if they exist
+          if (
+            iconCanvasesRef.current[index] &&
+            imagesLoadedRef.current[index]
+          ) {
+            ctx.drawImage(iconCanvasesRef.current[index], -20, -20, 40, 40)
+          }
+        } else {
+          // Show numbered circles if no icons/images are provided
+          ctx.beginPath()
+          ctx.arc(0, 0, 20, 0, Math.PI * 2)
+          ctx.fillStyle = "#4444ff"
+          ctx.fill()
+          ctx.fillStyle = "white"
+          ctx.textAlign = "center"
+          ctx.textBaseline = "middle"
+          ctx.font = "16px Arial"
+          ctx.fillText(`${icon.id + 1}`, 0, 0)
+        }
+
+        ctx.restore()
+      })
+      rafId = requestAnimationFrame(animate)
     }
+
+    const start = () => {
+      if (!running) {
+        running = true
+        animate()
+      }
+    }
+    const stop = () => {
+      running = false
+      if (rafId) cancelAnimationFrame(rafId)
+    }
+
+    // Only run the draw loop while the cloud is actually on screen.
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) start()
+        else stop()
+      },
+      { threshold: 0 }
+    )
+    observer.observe(canvas)
 
     return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current)
-      }
+      observer.disconnect()
+      stop()
     }
-  }, [icons, images, iconPositions, isDragging, mousePos, targetRotation])
+  }, [icons, images, iconPositions])
 
   return (
     <canvas

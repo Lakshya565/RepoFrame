@@ -32,7 +32,10 @@ export function GateOverlay({ children, title, className }: GateOverlayProps) {
   const signedIn = status === "signedIn";
 
   return (
-    <div className={cn("relative", className)}>
+    // min-h ensures short gated regions (e.g. a single instruction box or one
+    // history row) are still tall enough to hold the centered CTA card, so it is
+    // never clipped or "chopped" by the region — taller regions ignore it.
+    <div className={cn("relative min-h-48", className)}>
       {/* The real UI, made inert: blurred, dimmed, unfocusable, and unreadable to
           assistive tech so the gate is the only thing a visitor can act on. */}
       <div

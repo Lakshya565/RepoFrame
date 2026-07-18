@@ -28,6 +28,7 @@ import {
   type OutputSection,
 } from "@/lib/repo-api";
 import { useDemo } from "@/lib/demo-mode";
+import { useCompletionFlash } from "@/lib/use-completion-flash";
 import { GateOverlay } from "@/components/gate-overlay";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -447,6 +448,12 @@ function OutputPanel({
   const isRevisingThis = revisingSection === section;
   const currentCopyText = isEditing ? draft : sectionText;
 
+  // Pulse the card when a generate/regenerate for THIS section finishes, so the
+  // eye is drawn back to the fresh result.
+  const flashRef = useCompletionFlash<HTMLDivElement>(
+    isGeneratingThis || isRevisingThis,
+  );
+
   // Enters/leaves edit mode, seeding the draft from the current text on entry.
   function toggleEditing() {
     if (isEditing) {
@@ -492,21 +499,24 @@ function OutputPanel({
   // (with the always-visible instruction box) only appears once there is content.
   if (!hasContent) {
     return (
-      <PanelShell helper={helper} icon={icon} status={status} title={title}>
-        <EmptyPanelState
-          busy={busy}
-          generating={isGeneratingThis}
-          instruction={instruction}
-          instructionId={`instructions-${section}`}
-          onGenerate={handleGenerate}
-          onInstructionChange={setInstruction}
-        />
-      </PanelShell>
+      <div ref={flashRef} className="h-full rounded-lg">
+        <PanelShell helper={helper} icon={icon} status={status} title={title}>
+          <EmptyPanelState
+            busy={busy}
+            generating={isGeneratingThis}
+            instruction={instruction}
+            instructionId={`instructions-${section}`}
+            onGenerate={handleGenerate}
+            onInstructionChange={setInstruction}
+          />
+        </PanelShell>
+      </div>
     );
   }
 
   return (
-    <PanelShell helper={helper} icon={icon} status={status} title={title}>
+    <div ref={flashRef} className="h-full rounded-lg">
+      <PanelShell helper={helper} icon={icon} status={status} title={title}>
       {/* 1. The generated text (or the edit textarea). */}
       {isEditing ? (
         <Textarea
@@ -567,7 +577,8 @@ function OutputPanel({
           )}
         </Button>
       </div>
-    </PanelShell>
+      </PanelShell>
+    </div>
   );
 }
 
@@ -600,6 +611,9 @@ function InterviewPanel({
   const topics = interviewTopics ?? [];
   const hasTopics = interviewTopics !== null;
 
+  // Pulse the card when interview prep finishes generating/regenerating.
+  const flashRef = useCompletionFlash<HTMLDivElement>(generatingInterview);
+
   async function handleCopy() {
     try {
       await navigator.clipboard.writeText(interviewToText(topics));
@@ -614,31 +628,34 @@ function InterviewPanel({
   // empty interview card matches the sidebar height too.
   if (!hasTopics) {
     return (
+      <div ref={flashRef} className="h-full rounded-lg">
+        <PanelShell
+          helper="Likely questions about this project with talking points to rehearse."
+          icon={MessagesSquare}
+          status={status}
+          title="Interview prep"
+        >
+          <EmptyPanelState
+            busy={busy}
+            generating={generatingInterview}
+            instruction={instruction}
+            instructionId="instructions-interview"
+            onGenerate={() => onGenerateInterview(instruction.trim())}
+            onInstructionChange={setInstruction}
+          />
+        </PanelShell>
+      </div>
+    );
+  }
+
+  return (
+    <div ref={flashRef} className="h-full rounded-lg">
       <PanelShell
         helper="Likely questions about this project with talking points to rehearse."
         icon={MessagesSquare}
         status={status}
         title="Interview prep"
       >
-        <EmptyPanelState
-          busy={busy}
-          generating={generatingInterview}
-          instruction={instruction}
-          instructionId="instructions-interview"
-          onGenerate={() => onGenerateInterview(instruction.trim())}
-          onInstructionChange={setInstruction}
-        />
-      </PanelShell>
-    );
-  }
-
-  return (
-    <PanelShell
-      helper="Likely questions about this project with talking points to rehearse."
-      icon={MessagesSquare}
-      status={status}
-      title="Interview prep"
-    >
       {/* 1. The generated topics. */}
       {topics.length > 0 ? (
         <div className="space-y-3">
@@ -706,7 +723,8 @@ function InterviewPanel({
           )}
         </Button>
       </div>
-    </PanelShell>
+      </PanelShell>
+    </div>
   );
 }
 
