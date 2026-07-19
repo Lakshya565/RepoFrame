@@ -505,6 +505,7 @@ export function ProjectWriteupSection({
             <GeneratedOutputCards
               baselines={baselines}
               busy={busy}
+              generatingAll={busyTask?.kind === "all"}
               generatingInterview={busyTask?.kind === "interview"}
               generatingSection={generatingSection}
               interviewRevert={interviewRevert}

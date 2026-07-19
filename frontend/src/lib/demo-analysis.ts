@@ -2,20 +2,23 @@ import {
   type CommitActivityRange,
   type CommitActivityResponse,
   type CommitTimelineBucket,
+  type RankedRepoFile,
+  type RepoFile,
+  type RepoFileRankingResponse,
   type RepoMetadataResponse,
+  type RepoTreeResponse,
   type TechStackResponse,
 } from "@/lib/repo-api";
 import { DEMO_PROJECT, DEMO_REPO_URL } from "@/lib/demo-fixture";
 
-// Hardcoded pieces of the demo's Analysis tab. The file tree and ranked files load
-// LIVE from the backend (the public demo repo is allowed unauthenticated — see
-// backend require_user_or_public_demo), so those stay real and current. The rest is
-// frozen here because it doesn't need to be live: the overview title card's
-// metadata, the detected tech stack behind the icon cloud, and the commit activity
-// (GitHub's stats endpoints are slow, especially the heavier "all" range, so the
-// demo serves a frozen snapshot of the REAL history instead of paying that latency
-// on every visit). Fed into the same Analysis cards via useDemo, so it looks
-// identical — the snapshot just slowly goes stale as the real repo gains commits.
+// The demo's Analysis tab is a FULLY FROZEN snapshot of RepoFrame's own repo — no
+// backend request, no GitHub calls. Everything the Analysis page shows (overview
+// metadata, tech stack, commit activity, the file tree, and the ranked "files we
+// read") is served from the static fixtures below, so an anonymous /demo visitor
+// gets an instant, deterministic analysis with zero spend or latency. It's fed into
+// the same Analysis cards via useDemo, so it looks identical to a live analysis; the
+// snapshot just slowly goes stale as the real repo evolves (refresh the fixtures
+// here if the project's structure or history should be reflected anew).
 
 // How long each hardcoded "fetch" waits before resolving, so the card still plays its
 // loading → reveal animation like a live fetch. Tunable in one place.
@@ -199,4 +202,342 @@ export function demoFetchCommitActivity(
   range: CommitActivityRange,
 ): Promise<CommitActivityResponse> {
   return withDelay(DEMO_COMMIT_ACTIVITY[range]);
+}
+
+// ── File tree (frozen snapshot of the REAL RepoFrame tracked files) ───────────
+// Captured from `git ls-files` at freeze time (node_modules/.next excluded, as they
+// are for a real analysis). Directory rows and counts are derived from these paths
+// by buildRepoTree, so only the file leaves are listed here.
+const DEMO_TREE_PATHS: readonly string[] = [
+  ".gitignore",
+  "AGENTS.md",
+  "PHASES.md",
+  "PHASE_16_PLAN.md",
+  "README.md",
+  "backend/.env.example",
+  "backend/AGENTS.md",
+  "backend/app/__init__.py",
+  "backend/app/config.py",
+  "backend/app/main.py",
+  "backend/app/routers/__init__.py",
+  "backend/app/routers/generate.py",
+  "backend/app/routers/github.py",
+  "backend/app/routers/github_app.py",
+  "backend/app/routers/metrics.py",
+  "backend/app/routers/projects.py",
+  "backend/app/routers/repo.py",
+  "backend/app/routers/usage.py",
+  "backend/app/schemas/__init__.py",
+  "backend/app/schemas/github_app.py",
+  "backend/app/schemas/metrics.py",
+  "backend/app/schemas/outputs.py",
+  "backend/app/schemas/profile.py",
+  "backend/app/schemas/projects.py",
+  "backend/app/schemas/repo.py",
+  "backend/app/schemas/usage.py",
+  "backend/app/schemas/verify.py",
+  "backend/app/services/__init__.py",
+  "backend/app/services/auth.py",
+  "backend/app/services/claim_verifier.py",
+  "backend/app/services/commit_activity.py",
+  "backend/app/services/file_content_service.py",
+  "backend/app/services/file_ranker.py",
+  "backend/app/services/github_app.py",
+  "backend/app/services/github_service.py",
+  "backend/app/services/installation_store.py",
+  "backend/app/services/llm_client.py",
+  "backend/app/services/metrics_store.py",
+  "backend/app/services/output_generator.py",
+  "backend/app/services/profile_generator.py",
+  "backend/app/services/project_store.py",
+  "backend/app/services/prompt_format.py",
+  "backend/app/services/rate_limit.py",
+  "backend/app/services/repo_access.py",
+  "backend/app/services/repo_parser.py",
+  "backend/app/services/supabase_client.py",
+  "backend/app/services/tech_stack_detector.py",
+  "backend/app/services/token_estimator.py",
+  "backend/app/services/usage_store.py",
+  "backend/requirements-dev.txt",
+  "backend/requirements.txt",
+  "backend/tests/__init__.py",
+  "backend/tests/test_auth.py",
+  "backend/tests/test_claim_verifier.py",
+  "backend/tests/test_commit_activity.py",
+  "backend/tests/test_file_content_service.py",
+  "backend/tests/test_file_ranker.py",
+  "backend/tests/test_github_app.py",
+  "backend/tests/test_github_app_routes.py",
+  "backend/tests/test_github_service.py",
+  "backend/tests/test_installation_store.py",
+  "backend/tests/test_llm_client.py",
+  "backend/tests/test_login_gate_routes.py",
+  "backend/tests/test_metrics_store.py",
+  "backend/tests/test_output_generator.py",
+  "backend/tests/test_profile_generator.py",
+  "backend/tests/test_project_store.py",
+  "backend/tests/test_rate_limit.py",
+  "backend/tests/test_repo_access.py",
+  "backend/tests/test_repo_parser.py",
+  "backend/tests/test_supabase_client.py",
+  "backend/tests/test_tech_stack_detector.py",
+  "backend/tests/test_token_estimator.py",
+  "backend/tests/test_usage_store.py",
+  "frontend/.gitignore",
+  "frontend/AGENTS.md",
+  "frontend/CLAUDE.md",
+  "frontend/README.md",
+  "frontend/components.json",
+  "frontend/eslint.config.mjs",
+  "frontend/next.config.ts",
+  "frontend/package-lock.json",
+  "frontend/package.json",
+  "frontend/postcss.config.mjs",
+  "frontend/src/app/analysis/[owner]/[repo]/generate/page.tsx",
+  "frontend/src/app/analysis/[owner]/[repo]/history/page.tsx",
+  "frontend/src/app/analysis/[owner]/[repo]/layout.tsx",
+  "frontend/src/app/analysis/[owner]/[repo]/page.tsx",
+  "frontend/src/app/analysis/page.tsx",
+  "frontend/src/app/demo/generate/page.tsx",
+  "frontend/src/app/demo/history/page.tsx",
+  "frontend/src/app/demo/layout.tsx",
+  "frontend/src/app/demo/page.tsx",
+  "frontend/src/app/github/installed/page.tsx",
+  "frontend/src/app/globals.css",
+  "frontend/src/app/layout.tsx",
+  "frontend/src/app/page.tsx",
+  "frontend/src/app/saved/page.tsx",
+  "frontend/src/app/template.tsx",
+  "frontend/src/components/analysis-chrome.tsx",
+  "frontend/src/components/analysis-tabs.tsx",
+  "frontend/src/components/animated-divider.tsx",
+  "frontend/src/components/auth-button.tsx",
+  "frontend/src/components/brand-marquee.tsx",
+  "frontend/src/components/claim-verification-panel.tsx",
+  "frontend/src/components/connect-repos-button.tsx",
+  "frontend/src/components/gate-overlay.tsx",
+  "frontend/src/components/generate-stepper.tsx",
+  "frontend/src/components/generated-output-cards.tsx",
+  "frontend/src/components/github-installed-client.tsx",
+  "frontend/src/components/github-mark.tsx",
+  "frontend/src/components/github-rate-limit-card.tsx",
+  "frontend/src/components/glow-text.tsx",
+  "frontend/src/components/home-button.tsx",
+  "frontend/src/components/hover-pop-icon.tsx",
+  "frontend/src/components/important-files-card.tsx",
+  "frontend/src/components/kinetic-letters.tsx",
+  "frontend/src/components/landing-recent-projects.tsx",
+  "frontend/src/components/metrics/metrics-drawer.tsx",
+  "frontend/src/components/motion/reveal.tsx",
+  "frontend/src/components/project-auto-save.tsx",
+  "frontend/src/components/project-hydrator.tsx",
+  "frontend/src/components/project-writeup-section.tsx",
+  "frontend/src/components/repo-commit-timeline.tsx",
+  "frontend/src/components/repo-overview-card.tsx",
+  "frontend/src/components/repo-tree-view.tsx",
+  "frontend/src/components/repo-url-form.tsx",
+  "frontend/src/components/saved-projects-list.tsx",
+  "frontend/src/components/scroll-reveal.tsx",
+  "frontend/src/components/site-header.tsx",
+  "frontend/src/components/states.tsx",
+  "frontend/src/components/tech-glyph.tsx",
+  "frontend/src/components/tech-icon-cloud.tsx",
+  "frontend/src/components/tech-stack-card.tsx",
+  "frontend/src/components/tech-stack-nodes.tsx",
+  "frontend/src/components/theme-provider.tsx",
+  "frontend/src/components/theme-toggle.tsx",
+  "frontend/src/components/token-usage-panel.tsx",
+  "frontend/src/components/ui/badge.tsx",
+  "frontend/src/components/ui/border-beam.tsx",
+  "frontend/src/components/ui/button.tsx",
+  "frontend/src/components/ui/card.tsx",
+  "frontend/src/components/ui/chart.tsx",
+  "frontend/src/components/ui/confirm-dialog.tsx",
+  "frontend/src/components/ui/file-tree.tsx",
+  "frontend/src/components/ui/icon-cloud.tsx",
+  "frontend/src/components/ui/input.tsx",
+  "frontend/src/components/ui/magic-card.tsx",
+  "frontend/src/components/ui/marquee.tsx",
+  "frontend/src/components/ui/scroll-area.tsx",
+  "frontend/src/components/ui/scroll-progress.tsx",
+  "frontend/src/components/ui/skeleton.tsx",
+  "frontend/src/components/ui/textarea.tsx",
+  "frontend/src/components/user-context-form.tsx",
+  "frontend/src/components/verification-agent.tsx",
+  "frontend/src/lib/auth-context.tsx",
+  "frontend/src/lib/demo-analysis.ts",
+  "frontend/src/lib/demo-fixture.ts",
+  "frontend/src/lib/demo-generation.ts",
+  "frontend/src/lib/demo-mode.tsx",
+  "frontend/src/lib/generation-context.tsx",
+  "frontend/src/lib/github-app-api.ts",
+  "frontend/src/lib/marquee-icons.ts",
+  "frontend/src/lib/outputs.ts",
+  "frontend/src/lib/pointer.ts",
+  "frontend/src/lib/project-snapshot.ts",
+  "frontend/src/lib/projects-api.ts",
+  "frontend/src/lib/repo-api.ts",
+  "frontend/src/lib/repo-tree.ts",
+  "frontend/src/lib/repo-url.ts",
+  "frontend/src/lib/supabase.ts",
+  "frontend/src/lib/tech-icons.ts",
+  "frontend/src/lib/tech-stack-context.tsx",
+  "frontend/src/lib/use-completion-flash.ts",
+  "frontend/src/lib/use-inferred-context.ts",
+  "frontend/src/lib/use-project-autosave.ts",
+  "frontend/src/lib/use-project-hydrate.ts",
+  "frontend/src/lib/use-repo-resource.ts",
+  "frontend/src/lib/user-context.ts",
+  "frontend/src/lib/utils.ts",
+  "frontend/tsconfig.json",
+  "supabase/migrations/0001_phase15_init.sql",
+];
+
+// Counts the distinct directory prefixes across the frozen paths, so the tree's
+// "N directories" line matches the real structure without hardcoding a number.
+function countDirectories(paths: readonly string[]): number {
+  const dirs = new Set<string>();
+  for (const path of paths) {
+    const parts = path.split("/");
+    for (let depth = 1; depth < parts.length; depth += 1) {
+      dirs.add(parts.slice(0, depth).join("/"));
+    }
+  }
+  return dirs.size;
+}
+
+const DEMO_TREE: RepoTreeResponse = {
+  owner: DEMO_PROJECT.owner,
+  repo: DEMO_PROJECT.repo,
+  normalizedUrl: DEMO_REPO_URL,
+  defaultBranch: "main",
+  files: DEMO_TREE_PATHS.map(
+    (path): RepoFile => ({ path, type: "file", size: null, url: null }),
+  ),
+  totalFiles: DEMO_TREE_PATHS.length,
+  totalDirectories: countDirectories(DEMO_TREE_PATHS),
+  isTruncated: false,
+};
+
+export function demoFetchRepoTree(): Promise<RepoTreeResponse> {
+  return withDelay(DEMO_TREE);
+}
+
+// ── Ranked files (the files RepoFrame "read" — frozen) ────────────────────────
+// A curated stand-in for the deterministic ranker's Phase 5 output on this repo:
+// the READMEs, dependency manifests, entry points, and key service/router/lib
+// source it would surface. Reasons mirror the real ranker's phrasing (file_ranker.py)
+// so the popovers read identically. These paths are also starred in the tree above.
+const DEMO_RANKED_FILES: readonly RankedRepoFile[] = [
+  {
+    path: "README.md",
+    size: null,
+    importanceScore: 100,
+    reasons: ["README file explains project purpose, setup, or usage."],
+  },
+  {
+    path: "frontend/README.md",
+    size: null,
+    importanceScore: 92,
+    reasons: ["README file explains project purpose, setup, or usage."],
+  },
+  {
+    path: "backend/requirements.txt",
+    size: null,
+    importanceScore: 88,
+    reasons: ["Configuration or dependency file shows project tooling."],
+  },
+  {
+    path: "frontend/package.json",
+    size: null,
+    importanceScore: 88,
+    reasons: ["Configuration or dependency file shows project tooling."],
+  },
+  {
+    path: "backend/app/main.py",
+    size: null,
+    importanceScore: 84,
+    reasons: [
+      "Filename looks like an application entry point or route.",
+      "Source file can provide implementation evidence.",
+    ],
+  },
+  {
+    path: "frontend/src/app/page.tsx",
+    size: null,
+    importanceScore: 82,
+    reasons: [
+      "Filename looks like an application entry point or route.",
+      "Source file can provide implementation evidence.",
+    ],
+  },
+  {
+    path: "backend/app/services/file_ranker.py",
+    size: null,
+    importanceScore: 78,
+    reasons: [
+      "Path includes important source area: services.",
+      "Source file can provide implementation evidence.",
+    ],
+  },
+  {
+    path: "backend/app/services/tech_stack_detector.py",
+    size: null,
+    importanceScore: 77,
+    reasons: [
+      "Path includes important source area: services.",
+      "Source file can provide implementation evidence.",
+    ],
+  },
+  {
+    path: "backend/app/services/llm_client.py",
+    size: null,
+    importanceScore: 76,
+    reasons: [
+      "Path includes important source area: services.",
+      "Source file can provide implementation evidence.",
+    ],
+  },
+  {
+    path: "backend/app/routers/generate.py",
+    size: null,
+    importanceScore: 74,
+    reasons: [
+      "Path includes important source area: routers.",
+      "Source file can provide implementation evidence.",
+    ],
+  },
+  {
+    path: "frontend/src/lib/repo-api.ts",
+    size: null,
+    importanceScore: 72,
+    reasons: [
+      "Path includes important source area: lib.",
+      "Source file can provide implementation evidence.",
+    ],
+  },
+  {
+    path: "backend/app/config.py",
+    size: null,
+    importanceScore: 70,
+    reasons: [
+      "Configuration or dependency file shows project tooling.",
+      "Source file can provide implementation evidence.",
+    ],
+  },
+];
+
+const DEMO_RANKING: RepoFileRankingResponse = {
+  owner: DEMO_PROJECT.owner,
+  repo: DEMO_PROJECT.repo,
+  normalizedUrl: DEMO_REPO_URL,
+  defaultBranch: "main",
+  rankedFiles: [...DEMO_RANKED_FILES],
+  totalFiles: DEMO_TREE_PATHS.length,
+  rankableFiles: DEMO_TREE_PATHS.length,
+  returnedFiles: DEMO_RANKED_FILES.length,
+};
+
+export function demoFetchRankedFiles(): Promise<RepoFileRankingResponse> {
+  return withDelay(DEMO_RANKING);
 }

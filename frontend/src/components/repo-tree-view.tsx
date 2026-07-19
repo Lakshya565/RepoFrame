@@ -8,6 +8,8 @@ import {
   fetchRepoTree,
   type RepoTreeResponse,
 } from "@/lib/repo-api";
+import { demoFetchRankedFiles, demoFetchRepoTree } from "@/lib/demo-analysis";
+import { useDemo } from "@/lib/demo-mode";
 import { buildRepoTree, type RepoTreeNode } from "@/lib/repo-tree";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -82,6 +84,9 @@ function renderNodes(
 // contents, so Phase 4 stays focused on structure. Expansion state is owned by
 // the Tree component itself; we only feed it the converted elements.
 export function RepoTreeView({ repoUrl }: RepoTreeViewProps) {
+  // In the signed-out demo, the tree + ranked files are served from a frozen
+  // snapshot (demo-analysis.ts) instead of the backend, so /demo makes no request.
+  const demo = useDemo();
   const [tree, setTree] = useState<RepoTreeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -99,7 +104,7 @@ export function RepoTreeView({ repoUrl }: RepoTreeViewProps) {
     setError(null);
 
     try {
-      const repoTree = await fetchRepoTree(repoUrl);
+      const repoTree = await (demo ? demoFetchRepoTree() : fetchRepoTree(repoUrl));
       setTree(repoTree);
     } catch (error) {
       setTree(null);
@@ -111,7 +116,7 @@ export function RepoTreeView({ repoUrl }: RepoTreeViewProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [repoUrl]);
+  }, [repoUrl, demo]);
 
   // Runs the initial tree fetch for the current repo URL and ignores stale
   // responses if the page changes before GitHub responds.
@@ -123,7 +128,9 @@ export function RepoTreeView({ repoUrl }: RepoTreeViewProps) {
       setError(null);
 
       try {
-        const repoTree = await fetchRepoTree(repoUrl);
+        const repoTree = await (demo
+          ? demoFetchRepoTree()
+          : fetchRepoTree(repoUrl));
         if (isCurrentRequest) {
           setTree(repoTree);
         }
@@ -148,7 +155,7 @@ export function RepoTreeView({ repoUrl }: RepoTreeViewProps) {
     return () => {
       isCurrentRequest = false;
     };
-  }, [repoUrl]);
+  }, [repoUrl, demo]);
 
   // Best-effort fetch of the ranked-file paths so they can be starred in the tree.
   // Independent of the tree fetch and silent on failure — highlights are purely
@@ -156,7 +163,7 @@ export function RepoTreeView({ repoUrl }: RepoTreeViewProps) {
   useEffect(() => {
     let isCurrentRequest = true;
 
-    fetchRankedRepoFiles(repoUrl)
+    (demo ? demoFetchRankedFiles() : fetchRankedRepoFiles(repoUrl))
       .then((ranking) => {
         if (isCurrentRequest) {
           setImportantPaths(
@@ -173,7 +180,7 @@ export function RepoTreeView({ repoUrl }: RepoTreeViewProps) {
     return () => {
       isCurrentRequest = false;
     };
-  }, [repoUrl]);
+  }, [repoUrl, demo]);
 
   // Converts GitHub's flat list of file paths into nested nodes only when the
   // backend response changes, so render stays cheap.

@@ -9,10 +9,13 @@ import { saveProject, type SaveProjectRequest } from "@/lib/projects-api";
 
 // Best-effort auto-save of the current analysis snapshot to the signed-in user's
 // account. Debounced so a burst of edits/generations coalesces into one write, and
-// gated three ways so it never runs in the public/dev flow:
+// gated so it never runs in the public/dev flow:
 //   * NEXT_PUBLIC_SHOW_SAVED must be "true" (the saved-projects feature flag),
 //   * the user must be signed in,
-//   * repo metadata + some generated content must exist to save.
+//   * repo metadata must exist (i.e. the repo has been analyzed).
+// Analyzing a repo is enough to record it in History — generated content is NOT
+// required. The row is created on analysis and later upserts (same repo URL) once a
+// writeup is generated, so History becomes a true record of every repo looked at.
 // Failures are swallowed — persistence must never interrupt or surface over the
 // generation flow.
 
@@ -37,16 +40,6 @@ export function useProjectAutoSave(): void {
   } = useGeneration();
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // There is something worth persisting once a profile or any output section
-  // exists — a bare repo view (metadata only) is not saved.
-  const hasContent = Boolean(
-    profile ||
-      outputs.resumeBullets ||
-      outputs.readmeIntro ||
-      outputs.portfolioBlurb ||
-      outputs.linkedinDescription,
-  );
-
   // Signature of the current savable content. When it equals persistedSignature
   // there is nothing new to write — which is what makes a reopen inert (hydrate
   // seeds persistedSignature) and de-duplicates identical back-to-back saves.
@@ -67,8 +60,8 @@ export function useProjectAutoSave(): void {
     // All the gates. Any failing one means "don't auto-save" — cleanly inert.
     if (!SAVED_FEATURE_ENABLED) return;
     if (status !== "signedIn") return;
+    // Metadata present == the repo has been analyzed; that alone is savable.
     if (!repoMetadata) return;
-    if (!hasContent) return;
     // Never save mid-generation; wait for the run to settle.
     if (busyTask) return;
     // Nothing new since the last save (or since a reopen hydrated this content):
@@ -113,7 +106,6 @@ export function useProjectAutoSave(): void {
   }, [
     status,
     repoMetadata,
-    hasContent,
     busyTask,
     signature,
     persistedSignature,

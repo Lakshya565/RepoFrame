@@ -7,26 +7,39 @@ import { useReducedMotion } from "motion/react";
 // added to a `.card-done-overlay` element sitting inside the card.
 const FLASH_CLASS = "animate-card-done-radial";
 
-// Plays a one-shot "generation done" bloom on the returned ref's overlay element
-// whenever `active` transitions from true to false — i.e. a generation/regeneration
-// that was running has just finished — so the user's eye is drawn back to the fresh
-// result.
+// Plays a one-shot "generation done" bloom on the returned ref's overlay element.
+// It fires on either trigger:
+//   * `active` transitions from true to false — a generation/regeneration that was
+//     running has just finished; or
+//   * `pulseKey` changes to a new value — an explicit, imperative pulse the caller
+//     bumps for events that aren't a busy→idle transition (a revert/redo swap, or
+//     the first time the user views a bulk-generated card).
+// Either way the eye is drawn back to the fresh result.
 //
 // It toggles a CSS class on the DOM node directly (theme-aware via var(--brand))
 // rather than setting React state, so it never causes a re-render, and self-clears
-// on animationend so it can fire again next time. Skipped under reduced motion.
-export function useCompletionFlash<T extends HTMLElement>(active: boolean) {
+// on animationend so it can fire again next time. Skipped under reduced motion, and
+// never fired on mount (the initial pulseKey is the baseline, not a change).
+export function useCompletionFlash<T extends HTMLElement>(
+  active: boolean,
+  pulseKey: number = 0,
+) {
   const ref = useRef<T>(null);
   const wasActive = useRef(active);
+  const lastPulse = useRef(pulseKey);
   const reduce = useReducedMotion();
 
   useEffect(() => {
     const previouslyActive = wasActive.current;
     wasActive.current = active;
+    const pulsed = pulseKey !== lastPulse.current;
+    lastPulse.current = pulseKey;
 
+    // Fire on the busy→done falling edge OR an explicit pulse, but never while a
+    // generation is still running, and never under reduced motion.
+    const fallingEdge = previouslyActive && !active;
     const element = ref.current;
-    // Only fire on the falling edge (busy → done), and never under reduced motion.
-    if (!previouslyActive || active || !element || reduce) {
+    if ((!fallingEdge && !pulsed) || active || !element || reduce) {
       return;
     }
 
@@ -39,7 +52,7 @@ export function useCompletionFlash<T extends HTMLElement>(active: boolean) {
     const clear = () => element.classList.remove(FLASH_CLASS);
     element.addEventListener("animationend", clear, { once: true });
     return () => element.removeEventListener("animationend", clear);
-  }, [active, reduce]);
+  }, [active, pulseKey, reduce]);
 
   return ref;
 }

@@ -8,12 +8,26 @@ import { ArrowRight, Loader2 } from "lucide-react";
 import { parseRepoUrl } from "@/lib/repo-api";
 import { useAuth } from "@/lib/auth-context";
 import { isDemoActive } from "@/lib/demo-fixture";
+import { listProjects } from "@/lib/projects-api";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { DuplicateRepoDialog } from "@/components/duplicate-repo-dialog";
 import { GithubMark } from "@/components/github-mark";
 import { HoverPopIcon } from "@/components/hover-pop-icon";
 import { Input } from "@/components/ui/input";
 import { GlowText } from "@/components/glow-text";
 import { cn } from "@/lib/utils";
+
+// The saved-projects feature flag. Duplicate detection only makes sense when
+// History is on and the user is signed in (History is per-user); off otherwise.
+const SAVED_FEATURE_ENABLED = process.env.NEXT_PUBLIC_SHOW_SAVED === "true";
+
+// A repo the user is about to analyze that already exists in their History.
+type DuplicateMatch = {
+  owner: string;
+  repo: string;
+  projectId: string;
+  updatedAt: string;
+};
 
 // Handles the initial repo URL entry flow. It sends raw user input to the backend
 // parser, then routes with only normalized owner/repo/url values. Validation and
@@ -24,9 +38,25 @@ export function RepoUrlForm() {
   const [repoUrl, setRepoUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Set when the pasted repo is already in the user's History, which opens the
+  // "open saved vs re-analyze" dialog instead of navigating straight to a fresh run.
+  const [duplicate, setDuplicate] = useState<DuplicateMatch | null>(null);
+
+  // Routes to the analysis page for a repo, optionally reopening a saved snapshot
+  // (?projectId) so the Generate page pre-fills from History.
+  function goToAnalysis(owner: string, repo: string, projectId?: string) {
+    // The analysis route carries the repo identity in the path; the full URL is
+    // rebuilt from owner/repo on the other side (see lib/repo-url.ts).
+    const base = `/analysis/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+    router.push(
+      projectId ? `${base}?projectId=${encodeURIComponent(projectId)}` : base,
+    );
+  }
 
   // Validates empty input locally, delegates real GitHub URL parsing to FastAPI,
-  // and hands the normalized repo identity to the analysis route.
+  // then — for signed-in users with History on — checks whether this repo was
+  // already analyzed and, if so, asks before navigating. Otherwise routes straight
+  // to a fresh analysis.
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -40,11 +70,33 @@ export function RepoUrlForm() {
 
     try {
       const parsedRepo = await parseRepoUrl(repoUrl);
-      // The analysis route carries the repo identity in the path; the full URL is
-      // rebuilt from owner/repo on the other side (see lib/repo-url.ts).
-      router.push(
-        `/analysis/${encodeURIComponent(parsedRepo.owner)}/${encodeURIComponent(parsedRepo.repo)}`,
-      );
+
+      // Duplicate check: only when History is on and the user is signed in. A
+      // lookup failure is non-fatal — fall through to a normal fresh analysis.
+      if (SAVED_FEATURE_ENABLED && status === "signedIn") {
+        try {
+          const projects = await listProjects();
+          const match = projects.find(
+            (project) =>
+              project.owner.toLowerCase() === parsedRepo.owner.toLowerCase() &&
+              project.repo.toLowerCase() === parsedRepo.repo.toLowerCase(),
+          );
+          if (match) {
+            setDuplicate({
+              owner: parsedRepo.owner,
+              repo: parsedRepo.repo,
+              projectId: match.id,
+              updatedAt: match.updatedAt,
+            });
+            setIsSubmitting(false);
+            return;
+          }
+        } catch {
+          // Ignore — a History lookup failure should never block analyzing.
+        }
+      }
+
+      goToAnalysis(parsedRepo.owner, parsedRepo.repo);
     } catch (error) {
       setError(
         error instanceof Error
@@ -96,11 +148,27 @@ export function RepoUrlForm() {
   }
 
   return (
-    <form className="w-full" onSubmit={handleSubmit} noValidate>
-      <label
-        className="text-sm font-medium text-foreground"
-        htmlFor="repo-url"
-      >
+    <>
+      {duplicate ? (
+        <DuplicateRepoDialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setDuplicate(null);
+          }}
+          owner={duplicate.owner}
+          repo={duplicate.repo}
+          updatedAt={duplicate.updatedAt}
+          onOpenSaved={() =>
+            goToAnalysis(duplicate.owner, duplicate.repo, duplicate.projectId)
+          }
+          onReanalyze={() => goToAnalysis(duplicate.owner, duplicate.repo)}
+        />
+      ) : null}
+      <form className="w-full" onSubmit={handleSubmit} noValidate>
+        <label
+          className="text-sm font-medium text-foreground"
+          htmlFor="repo-url"
+        >
         <GlowText text="GitHub repository URL" />
       </label>
       <div className="mt-2 flex flex-col gap-2 sm:flex-row">
@@ -150,6 +218,7 @@ export function RepoUrlForm() {
           </p>
         )}
       </div>
-    </form>
+      </form>
+    </>
   );
 }

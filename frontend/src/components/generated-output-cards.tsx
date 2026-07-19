@@ -117,6 +117,9 @@ type GeneratedOutputCardsProps = {
   // True while any generation runs anywhere — disables every trigger so calls
   // cannot stack up.
   busy: boolean;
+  // True while "Generate everything" is running. The active panel treats this as its
+  // own generation so it blooms on bulk completion; the others bloom on first view.
+  generatingAll: boolean;
   generatingSection: OutputSection | null;
   revisingSection: OutputSection | null;
   generatingInterview: boolean;
@@ -157,6 +160,7 @@ export function GeneratedOutputCards({
   interviewTopics,
   baselines,
   busy,
+  generatingAll,
   generatingSection,
   revisingSection,
   generatingInterview,
@@ -201,9 +205,94 @@ export function GeneratedOutputCards({
     [INTERVIEW_KEY]: interviewTopics !== null ? "ready" : "empty",
   };
 
+  // ── Viewed / "new" tracking for the rail dots + first-view bloom ──────────────
+  // A rail dot is green while its card holds freshly generated content the user
+  // hasn't looked at yet, and reverts to a grey ring once viewed (or when empty) — so
+  // the dot doubles as a "new since you last saw it" marker. "Freshly generated" is
+  // detected by a per-panel content token (the generation baseline, which changes on
+  // every generate/regenerate but NOT on a manual edit); a token differing from the
+  // one last seen means that card is unviewed.
+
+  // A stable token for one panel's current generated content ("" when nothing is
+  // generated). For outputs it's the generation baseline, so edits don't change it;
+  // content restored from a saved snapshot has no baseline, so a constant stands in
+  // (it counts as already-seen, and only a real regenerate re-flags it).
+  const tokenFor = (key: PanelKey): string => {
+    if (key === INTERVIEW_KEY) {
+      return interviewTopics
+        ? `interview:${JSON.stringify(interviewTopics)}`
+        : "";
+    }
+    if (!sectionHasContent(outputs, key)) {
+      return "";
+    }
+    return baselines[key] ?? "generated";
+  };
+
+  // Tokens the user has already seen, seeded from whatever content exists at mount —
+  // so a returning user (content survived tab navigation or a reopen) starts with
+  // everything marked seen, while a generate/regenerate during this mount changes the
+  // token and re-greens that card.
+  const [seenTokens, setSeenTokens] = useState<Record<string, string>>(() => {
+    const seed: Record<string, string> = {};
+    for (const card of OUTPUT_CARDS) seed[card.section] = tokenFor(card.section);
+    seed[INTERVIEW_KEY] = tokenFor(INTERVIEW_KEY);
+    return seed;
+  });
+
+  // Per-panel bloom trigger, bumped to replay the "done" cue for events that aren't a
+  // busy→idle transition: a revert/redo swap, or first-viewing a bulk-generated card.
+  const [blooms, setBlooms] = useState<Record<string, number>>({});
+  const pulse = (key: PanelKey) =>
+    setBlooms((current) => ({ ...current, [key]: (current[key] ?? 0) + 1 }));
+
+  // Unviewed = has fresh content the user hasn't seen, and isn't the panel currently
+  // on screen (the active panel is being viewed by definition).
+  const isUnviewed = (key: PanelKey): boolean =>
+    key !== active && tokenFor(key) !== "" && seenTokens[key] !== tokenFor(key);
+
+  const unviewedMap: Record<PanelKey, boolean> = {
+    resumeBullets: isUnviewed("resumeBullets"),
+    readmeIntro: isUnviewed("readmeIntro"),
+    portfolioBlurb: isUnviewed("portfolioBlurb"),
+    linkedinDescription: isUnviewed("linkedinDescription"),
+    [INTERVIEW_KEY]: isUnviewed(INTERVIEW_KEY),
+  };
+
+  // Selecting a panel marks both the one being left and the one being opened as seen,
+  // and — if the opened one was unviewed — replays the done cue so a bulk-generated
+  // card announces itself the first time it is shown.
+  function handleSelect(key: PanelKey) {
+    if (isUnviewed(key)) {
+      pulse(key);
+    }
+    setSeenTokens((current) => ({
+      ...current,
+      [active]: tokenFor(active),
+      [key]: tokenFor(key),
+    }));
+    setActive(key);
+  }
+
+  // Revert/redo swaps cached content instantly (no busy transition), so replay the
+  // done cue on that card explicitly, then delegate the real swap.
+  function handleRevertSection(section: OutputSection) {
+    onRevertSection(section);
+    pulse(section);
+  }
+  function handleRevertInterview() {
+    onRevertInterview();
+    pulse(INTERVIEW_KEY);
+  }
+
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,15rem)_minmax(0,1fr)]">
-      <OutputRail active={active} onSelect={setActive} statuses={statuses} />
+      <OutputRail
+        active={active}
+        onSelect={handleSelect}
+        statuses={statuses}
+        unviewed={unviewedMap}
+      />
 
       {/* Detail column. Every panel is rendered so its local state survives a rail
           switch; only the active one is shown. Each wrapper is h-full so a short
@@ -217,14 +306,17 @@ export function GeneratedOutputCards({
           >
             <OutputPanel
               busy={busy}
+              generatingAll={generatingAll}
               generatingSection={generatingSection}
               helper={card.helper}
               icon={card.icon}
+              isActive={active === card.section}
               onGenerateSection={onGenerateSection}
               onOutputsChange={onOutputsChange}
-              onRevertSection={onRevertSection}
+              onRevertSection={handleRevertSection}
               onReviseSection={onReviseSection}
               outputs={outputs}
+              pulseKey={blooms[card.section] ?? 0}
               revert={sectionRevert[card.section]}
               revisingSection={revisingSection}
               section={card.section}
@@ -237,11 +329,14 @@ export function GeneratedOutputCards({
         <div className={cn("h-full", active !== INTERVIEW_KEY && "hidden")}>
           <InterviewPanel
             busy={busy}
+            generatingAll={generatingAll}
             generatingInterview={generatingInterview}
             interviewTopics={interviewTopics}
+            isActive={active === INTERVIEW_KEY}
             onGenerateInterview={onGenerateInterview}
             onReviseInterview={onReviseInterview}
-            onRevert={onRevertInterview}
+            onRevert={handleRevertInterview}
+            pulseKey={blooms[INTERVIEW_KEY] ?? 0}
             revert={interviewRevert}
             status={statuses[INTERVIEW_KEY]}
           />
@@ -254,6 +349,9 @@ export function GeneratedOutputCards({
 type OutputRailProps = {
   active: PanelKey;
   statuses: Record<PanelKey, PanelStatus>;
+  // Which panels hold freshly generated content the user hasn't viewed yet, so their
+  // rail dot shows the green "new" marker instead of a grey ring.
+  unviewed: Record<PanelKey, boolean>;
   onSelect: (key: PanelKey) => void;
 };
 
@@ -261,7 +359,7 @@ type OutputRailProps = {
 // a long output) and a horizontal, scrollable chip row on mobile. Each entry is a
 // button carrying the output's icon, title, and status so the whole set reads at a
 // glance which pieces exist and which still need generating.
-function OutputRail({ active, statuses, onSelect }: OutputRailProps) {
+function OutputRail({ active, statuses, unviewed, onSelect }: OutputRailProps) {
   const items: { key: PanelKey; title: string; icon: LucideIcon }[] = [
     ...OUTPUT_CARDS.map((card) => ({
       key: card.section,
@@ -316,7 +414,10 @@ function OutputRail({ active, statuses, onSelect }: OutputRailProps) {
                 {STATUS_LABEL[status]}
               </span>
             </span>
-            <StatusDot className="ml-auto hidden lg:block" status={status} />
+            <StatusDot
+              className="ml-auto hidden lg:block"
+              unviewed={unviewed[item.key]}
+            />
           </button>
         );
       })}
@@ -324,13 +425,15 @@ function OutputRail({ active, statuses, onSelect }: OutputRailProps) {
   );
 }
 
-// The compact status marker used in the rail: a hollow ring while empty, a filled
-// brand dot once there is content.
+// The compact rail marker, now a "new / seen" indicator: a filled brand dot while
+// the card holds freshly generated content the user hasn't viewed yet, otherwise a
+// hollow grey ring (nothing generated, or already seen). Readiness itself is still
+// spelled out by the rail's status label and the panel header's status pill.
 function StatusDot({
-  status,
+  unviewed,
   className,
 }: {
-  status: PanelStatus;
+  unviewed: boolean;
   className?: string;
 }) {
   return (
@@ -338,7 +441,7 @@ function StatusDot({
       aria-hidden
       className={cn(
         "size-2 rounded-full",
-        status === "empty" ? "border border-muted-foreground/40" : "bg-brand",
+        unviewed ? "bg-brand" : "border border-muted-foreground/40",
         className,
       )}
     />
@@ -431,6 +534,14 @@ type OutputPanelProps = {
   status: PanelStatus;
   outputs: GeneratedOutputs;
   busy: boolean;
+  // True while "Generate everything" runs; only the active panel uses it (so it
+  // blooms when the bulk run finishes while it is the one on screen).
+  generatingAll: boolean;
+  // Whether this panel is the one currently shown.
+  isActive: boolean;
+  // Bumped by the parent to replay the done cue for a non-busy event (revert/redo,
+  // or the first time this bulk-generated card is viewed).
+  pulseKey: number;
   generatingSection: OutputSection | null;
   revisingSection: OutputSection | null;
   // The section's revert cache entry (undefined until it has been regenerated).
@@ -461,6 +572,9 @@ function OutputPanel({
   status,
   outputs,
   busy,
+  generatingAll,
+  isActive,
+  pulseKey,
   generatingSection,
   revisingSection,
   revert,
@@ -483,10 +597,12 @@ function OutputPanel({
   const isRevisingThis = revisingSection === section;
   const currentCopyText = isEditing ? draft : sectionText;
 
-  // Pulse the card when a generate/regenerate for THIS section finishes, so the
-  // eye is drawn back to the fresh result.
+  // Pulse the card when a generate/regenerate for THIS section finishes (or, while
+  // it is the active panel, when a bulk "Generate everything" run finishes), and on
+  // an explicit pulse (revert/redo, or first view of a bulk-generated card).
   const flashRef = useCompletionFlash<HTMLSpanElement>(
-    isGeneratingThis || isRevisingThis,
+    isGeneratingThis || isRevisingThis || (isActive && generatingAll),
+    pulseKey,
   );
 
   // Enters/leaves edit mode, seeding the draft from the current text on entry.
@@ -664,6 +780,9 @@ type InterviewPanelProps = {
   interviewTopics: InterviewTopic[] | null;
   status: PanelStatus;
   busy: boolean;
+  generatingAll: boolean;
+  isActive: boolean;
+  pulseKey: number;
   generatingInterview: boolean;
   revert: InterviewRevert;
   onGenerateInterview: (guidance: string) => Promise<void> | void;
@@ -681,6 +800,9 @@ function InterviewPanel({
   interviewTopics,
   status,
   busy,
+  generatingAll,
+  isActive,
+  pulseKey,
   generatingInterview,
   revert,
   onGenerateInterview,
@@ -693,8 +815,13 @@ function InterviewPanel({
   const topics = interviewTopics ?? [];
   const hasTopics = interviewTopics !== null;
 
-  // Pulse the card when interview prep finishes generating/regenerating.
-  const flashRef = useCompletionFlash<HTMLSpanElement>(generatingInterview);
+  // Pulse the card when interview prep finishes generating/regenerating (or, while
+  // active, when a bulk run finishes), and on an explicit pulse (revert/redo, or
+  // first view of a bulk-generated card).
+  const flashRef = useCompletionFlash<HTMLSpanElement>(
+    generatingInterview || (isActive && generatingAll),
+    pulseKey,
+  );
 
   async function handleCopy() {
     try {
