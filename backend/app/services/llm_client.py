@@ -9,7 +9,6 @@ from app.config import (
     OPENAI_MAX_RETRIES,
     OPENAI_MODEL,
     OPENAI_REASONING_EFFORT,
-    OPENAI_TEMPERATURE,
     OPENAI_TIMEOUT_SECONDS,
 )
 from app.services.token_estimator import check_prompt_budget, estimate_input_tokens
@@ -88,19 +87,6 @@ class CompletionResult:
 CompletionFn = Callable[[str, str], CompletionResult]
 
 
-# Model families whose names begin with these prefixes are reasoning models. They
-# reject `temperature` (use `reasoning_effort` instead) and bill reasoning tokens
-# against the completion budget.
-_REASONING_MODEL_PREFIXES = ("gpt-5", "o1", "o3", "o4")
-_LUNA_MODEL_PREFIX = "gpt-5.6-luna"
-
-
-# True when the configured model is a reasoning model, so request parameters can
-# be built to match what that model family accepts.
-def _is_reasoning_model(model: str) -> bool:
-    return model.lower().startswith(_REASONING_MODEL_PREFIXES)
-
-
 # Module-level client cache. The OpenAI client maintains an HTTP connection pool,
 # so reusing one instance across requests avoids repeated connection/TLS setup.
 # It is built lazily (the key may be unset at import time) with explicit timeout
@@ -127,21 +113,10 @@ def _get_client():
     return _client
 
 
-# Adds the sampling parameter the configured model accepts: reasoning models take
-# `reasoning_effort` (and reject `temperature`); other models take `temperature`.
-# Tool-enabled Luna requests use a narrower override in _build_agent_kwargs
-# because Chat Completions rejects function tools with reasoning enabled.
-def _apply_sampling_params(kwargs: dict) -> None:
-    if _is_reasoning_model(OPENAI_MODEL):
-        kwargs["reasoning_effort"] = OPENAI_REASONING_EFFORT
-    else:
-        kwargs["temperature"] = OPENAI_TEMPERATURE
-
-
-# Builds the create() kwargs for the configured model. json_object forces valid
-# JSON (the schema is enforced afterwards by validating against a Pydantic model).
+# Builds Luna's create() kwargs. json_object forces valid JSON (the schema is
+# enforced afterwards by validating against a Pydantic model).
 def _build_create_kwargs(system_prompt: str, user_prompt: str) -> dict:
-    kwargs: dict = {
+    return {
         "model": OPENAI_MODEL,
         "messages": [
             {"role": "system", "content": system_prompt},
@@ -149,9 +124,8 @@ def _build_create_kwargs(system_prompt: str, user_prompt: str) -> dict:
         ],
         "response_format": {"type": "json_object"},
         "max_completion_tokens": OPENAI_MAX_OUTPUT_TOKENS,
+        "reasoning_effort": OPENAI_REASONING_EFFORT,
     }
-    _apply_sampling_params(kwargs)
-    return kwargs
 
 
 # Issues one chat-completion request and maps every transport/API failure to a
@@ -305,11 +279,10 @@ class AgentStep:
 AgentCompletionFn = Callable[..., AgentStep]
 
 
-# Builds create() kwargs for either an investigation or verdict turn. OpenAI's
-# Chat Completions endpoint rejects Luna function tools when reasoning is enabled,
-# so Luna's tool-enabled turns use reasoning_effort="none". Tool-free turns
-# restore the configured effort and request JSON mode; the verifier deliberately
-# uses this shape for its final evidence judgment.
+# Builds Luna kwargs for either an investigation or verdict turn. Chat
+# Completions rejects function tools when Luna reasoning is enabled, so every
+# tool-enabled turn uses reasoning_effort="none". Tool-free turns restore the
+# configured effort and request JSON mode for the final evidence judgment.
 def _build_agent_kwargs(
     messages: list[dict], tools: list[dict], tool_choice: str
 ) -> dict:
@@ -321,17 +294,10 @@ def _build_agent_kwargs(
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = tool_choice
-        if _is_reasoning_model(OPENAI_MODEL):
-            kwargs["reasoning_effort"] = (
-                "none"
-                if OPENAI_MODEL.lower().startswith(_LUNA_MODEL_PREFIX)
-                else OPENAI_REASONING_EFFORT
-            )
-        else:
-            kwargs["temperature"] = OPENAI_TEMPERATURE
+        kwargs["reasoning_effort"] = "none"
     else:
         kwargs["response_format"] = {"type": "json_object"}
-        _apply_sampling_params(kwargs)
+        kwargs["reasoning_effort"] = OPENAI_REASONING_EFFORT
     return kwargs
 
 

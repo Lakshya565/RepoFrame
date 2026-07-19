@@ -1,5 +1,4 @@
 import unittest
-from unittest import mock
 
 from app.config import MAX_TOTAL_PROMPT_CHARS
 from app.services import llm_client
@@ -101,37 +100,24 @@ class CompleteWithToolsTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 413)
 
 
-# Luna uses the only Chat Completions shapes OpenAI supports: function-tool turns
+# Luna uses the two Chat Completions shapes OpenAI accepts: function-tool turns
 # disable reasoning, while tool-free verdict turns restore the configured effort.
-# These are request-shape tests only; no OpenAI client is constructed.
+# These tests never construct an OpenAI client.
 class AgentReasoningEffortTests(unittest.TestCase):
     def test_luna_with_tools_disables_reasoning(self) -> None:
-        with mock.patch.object(llm_client, "OPENAI_MODEL", "gpt-5.6-luna"):
-            kwargs = _build_agent_kwargs([], _TOOL, "auto")
+        kwargs = _build_agent_kwargs([], _TOOL, "auto")
+        self.assertEqual(kwargs["model"], "gpt-5.6-luna")
         self.assertEqual(kwargs["reasoning_effort"], "none")
         self.assertNotIn("temperature", kwargs)
         self.assertNotIn("response_format", kwargs)
 
-    def test_reasoning_model_without_tools_keeps_configured_effort(self) -> None:
-        with mock.patch.object(llm_client, "OPENAI_MODEL", "gpt-5.6-luna"):
-            kwargs = _build_agent_kwargs([], [], "auto")
+    def test_luna_without_tools_keeps_configured_effort(self) -> None:
+        kwargs = _build_agent_kwargs([], [], "auto")
+        self.assertEqual(kwargs["model"], "gpt-5.6-luna")
         self.assertEqual(
             kwargs["reasoning_effort"], llm_client.OPENAI_REASONING_EFFORT
         )
         self.assertEqual(kwargs["response_format"], {"type": "json_object"})
-
-    def test_other_reasoning_model_with_tools_keeps_configured_effort(self) -> None:
-        with mock.patch.object(llm_client, "OPENAI_MODEL", "gpt-5.4-mini"):
-            kwargs = _build_agent_kwargs([], _TOOL, "auto")
-        self.assertEqual(
-            kwargs["reasoning_effort"], llm_client.OPENAI_REASONING_EFFORT
-        )
-
-    def test_non_reasoning_model_with_tools_uses_temperature(self) -> None:
-        with mock.patch.object(llm_client, "OPENAI_MODEL", "gpt-4o-mini"):
-            kwargs = _build_agent_kwargs([], _TOOL, "auto")
-        self.assertNotIn("reasoning_effort", kwargs)
-        self.assertIn("temperature", kwargs)
 
 
 if __name__ == "__main__":

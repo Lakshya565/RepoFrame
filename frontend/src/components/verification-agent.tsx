@@ -86,7 +86,7 @@ export function VerificationAgent({
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-base font-semibold">Evidence Investigator</h3>
               <Badge variant="outline" className="border-brand/40 text-brand">
-                Evidence-backed audit
+                Agentic Audit
               </Badge>
             </div>
             <p className="mt-1 text-sm leading-6 text-muted-foreground">

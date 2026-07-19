@@ -46,17 +46,12 @@ MAX_FILE_SIZE_BYTES: int = int(os.getenv("MAX_FILE_SIZE_BYTES", "100000"))
 
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 
-# Model and output bounds for profile generation (Phase 10). These directly
-# control cost: OPENAI_MODEL picks the price tier, OPENAI_MAX_OUTPUT_TOKENS caps
-# completion length (output tokens are the more expensive side), and
-# OPENAI_TEMPERATURE keeps generation grounded rather than creative. Input size
-# is capped separately by MAX_TOTAL_PROMPT_CHARS via check_prompt_budget().
-#
-# GPT-5.6 Luna is RepoFrame's single model for generation and the Evidence
-# Investigator. Structured and tool-free verdict calls use the configured
-# reasoning effort; Chat Completions tool turns use "none", the supported Luna
-# request shape. Temperature is omitted for every Luna call.
-OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
+# GPT-5.6 Luna is RepoFrame's single model for generation and agentic work.
+# This is intentionally pinned in code rather than deploy-configurable, so a
+# stale OPENAI_MODEL environment variable cannot silently restore an older model.
+# Input size is capped separately by MAX_TOTAL_PROMPT_CHARS, while the settings
+# below bound output length, reasoning cost, network time, and retries.
+OPENAI_MODEL: str = "gpt-5.6-luna"
 
 # Output budget. On reasoning models, reasoning tokens consume this same budget,
 # so it must comfortably fit both the reasoning and the JSON answer; medium/high
@@ -64,14 +59,11 @@ OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
 # the answer (handled as a clear error, but better avoided).
 OPENAI_MAX_OUTPUT_TOKENS: int = int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "6000"))
 
-# Applied only to reasoning models (minimal | low | medium | high). "medium"
-# trades a little more reasoning-token spend and latency for better grounding
-# and synthesis on the profile task; raise to "high" for maximum quality. Ignored
-# for non-reasoning models, which use OPENAI_TEMPERATURE instead.
+# Applied to Luna's structured generation and tool-free final verdict calls
+# (minimal | low | medium | high). "medium" trades a little more reasoning-token
+# spend and latency for better grounding and synthesis. Function-tool turns use
+# "none" because Chat Completions rejects tools with reasoning enabled.
 OPENAI_REASONING_EFFORT: str = os.getenv("OPENAI_REASONING_EFFORT", "medium")
-
-# Used only for non-reasoning models (e.g. gpt-4o-mini). Lower = more grounded.
-OPENAI_TEMPERATURE: float = float(os.getenv("OPENAI_TEMPERATURE", "0.3"))
 
 # Network reliability bounds for the OpenAI client. The SDK default timeout is
 # 600 seconds (10 minutes) — far too long for a user-facing request, so a hung
