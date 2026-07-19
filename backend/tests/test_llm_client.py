@@ -111,6 +111,39 @@ class AgentReasoningEffortTests(unittest.TestCase):
         self.assertNotIn("temperature", kwargs)
         self.assertNotIn("response_format", kwargs)
 
+    def test_follow_up_tool_turn_also_disables_reasoning(self) -> None:
+        # Reproduce the second/third-loop request shape from the Render failure:
+        # Luna receives the earlier function call and its result, while the same
+        # function schemas remain available for another investigation step.
+        messages = [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "noop",
+                            "arguments": "{}",
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "content": "result",
+            },
+        ]
+
+        kwargs = _build_agent_kwargs(messages, _TOOL, "auto")
+
+        self.assertEqual(kwargs["model"], "gpt-5.6-luna")
+        self.assertEqual(kwargs["reasoning_effort"], "none")
+        self.assertEqual(kwargs["tools"], _TOOL)
+        self.assertEqual(kwargs["tool_choice"], "auto")
+
     def test_luna_without_tools_keeps_configured_effort(self) -> None:
         kwargs = _build_agent_kwargs([], [], "auto")
         self.assertEqual(kwargs["model"], "gpt-5.6-luna")
