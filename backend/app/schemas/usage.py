@@ -37,3 +37,4 @@ class UsageTotals(BaseModel):
 # This is what lets the user track project spend without the OpenAI dashboard.
 class LifetimeUsageResponse(UsageTotals):
     runs: int = 0
+    model_calls: int = Field(0, alias="modelCalls")

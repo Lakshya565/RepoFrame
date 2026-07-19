@@ -1,3 +1,4 @@
+import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -23,14 +24,6 @@ from app.services.token_estimator import check_prompt_budget, estimate_input_tok
 # tool-calling agent loop (the loop itself lives in the calling service).
 
 logger = logging.getLogger(__name__)
-
-
-# Carries a user-facing generation error plus the HTTP status a route should
-# return, mirroring the GitHub service error pattern so routes stay thin.
-class LLMError(RuntimeError):
-    def __init__(self, message: str, status_code: int) -> None:
-        super().__init__(message)
-        self.status_code = status_code
 
 
 # Actual token usage reported by OpenAI for a single call. Unlike the pre-call
@@ -61,6 +54,23 @@ class TokenUsage:
 EMPTY_USAGE = TokenUsage()
 
 
+# Carries a user-facing generation error plus the HTTP status a route should
+# return. Completed-but-unusable responses preserve their usage so an agent loop
+# can account for the successful API request before surfacing the failure.
+class LLMError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        status_code: int,
+        usage: TokenUsage = EMPTY_USAGE,
+        model_calls: int = 0,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.usage = usage
+        self.model_calls = model_calls
+
+
 # The raw result of one model call: response text, finish_reason (so callers can
 # distinguish a complete answer from one truncated at the output-token limit,
 # common with reasoning models), and the real token usage for cost tracking.
@@ -82,6 +92,7 @@ CompletionFn = Callable[[str, str], CompletionResult]
 # reject `temperature` (use `reasoning_effort` instead) and bill reasoning tokens
 # against the completion budget.
 _REASONING_MODEL_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+_LUNA_MODEL_PREFIX = "gpt-5.6-luna"
 
 
 # True when the configured model is a reasoning model, so request parameters can
@@ -118,7 +129,8 @@ def _get_client():
 
 # Adds the sampling parameter the configured model accepts: reasoning models take
 # `reasoning_effort` (and reject `temperature`); other models take `temperature`.
-# Shared by the single-shot and tool-calling request builders.
+# Tool-enabled Luna requests use a narrower override in _build_agent_kwargs
+# because Chat Completions rejects function tools with reasoning enabled.
 def _apply_sampling_params(kwargs: dict) -> None:
     if _is_reasoning_model(OPENAI_MODEL):
         kwargs["reasoning_effort"] = OPENAI_REASONING_EFFORT
@@ -244,10 +256,17 @@ def complete(
             "OPENAI_MAX_OUTPUT_TOKENS (and/or lower OPENAI_REASONING_EFFORT) and "
             "try again.",
             502,
+            usage=result.usage,
+            model_calls=1,
         )
 
     if not result.content.strip():
-        raise LLMError("OpenAI returned an empty response.", 502)
+        raise LLMError(
+            "OpenAI returned an empty response.",
+            502,
+            usage=result.usage,
+            model_calls=1,
+        )
 
     return result.content, estimate_input_tokens(total_chars), result.usage
 
@@ -286,11 +305,11 @@ class AgentStep:
 AgentCompletionFn = Callable[..., AgentStep]
 
 
-# Builds create() kwargs for a tool-calling turn. No json_object response_format
-# here: intermediate turns must be free to emit tool calls, and the final answer is
-# parsed/validated by the caller. tool_choice "none" (forced final turn) keeps the
-# tools listed for message-history consistency while telling the model not to call
-# them. Reasoning vs. temperature handling matches the single-shot path.
+# Builds create() kwargs for either an investigation or verdict turn. OpenAI's
+# Chat Completions endpoint rejects Luna function tools when reasoning is enabled,
+# so Luna's tool-enabled turns use reasoning_effort="none". Tool-free turns
+# restore the configured effort and request JSON mode; the verifier deliberately
+# uses this shape for its final evidence judgment.
 def _build_agent_kwargs(
     messages: list[dict], tools: list[dict], tool_choice: str
 ) -> dict:
@@ -302,7 +321,17 @@ def _build_agent_kwargs(
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = tool_choice
-    _apply_sampling_params(kwargs)
+        if _is_reasoning_model(OPENAI_MODEL):
+            kwargs["reasoning_effort"] = (
+                "none"
+                if OPENAI_MODEL.lower().startswith(_LUNA_MODEL_PREFIX)
+                else OPENAI_REASONING_EFFORT
+            )
+        else:
+            kwargs["temperature"] = OPENAI_TEMPERATURE
+    else:
+        kwargs["response_format"] = {"type": "json_object"}
+        _apply_sampling_params(kwargs)
     return kwargs
 
 
@@ -332,11 +361,10 @@ def openai_agent_completion(
     )
 
 
-# Returns the budget-relevant text of one message (the running tool results are
-# the part that grows the context across turns).
-def _message_text(message: dict) -> str:
-    content = message.get("content")
-    return content if isinstance(content, str) else ""
+# Counts the serialized messages, tool schemas, and tool-call arguments because
+# all of them consume context across agent turns.
+def _agent_request_chars(messages: list[dict], tools: list[dict]) -> int:
+    return len(json.dumps({"messages": messages, "tools": tools}, ensure_ascii=False))
 
 
 # Runs one agent turn through the same safety gate as the single-shot path: the
@@ -349,7 +377,7 @@ def complete_with_tools(
     tool_choice: str = "auto",
     agent_fn: AgentCompletionFn = openai_agent_completion,
 ) -> AgentStep:
-    total_chars = sum(len(_message_text(message)) for message in messages)
+    total_chars = _agent_request_chars(messages, tools)
     within_budget, reason = check_prompt_budget(total_chars)
     if not within_budget:
         raise LLMError(reason, 413)
@@ -362,6 +390,8 @@ def complete_with_tools(
             "OPENAI_MAX_OUTPUT_TOKENS (and/or lower OPENAI_REASONING_EFFORT) and "
             "try again.",
             502,
+            usage=step.usage,
+            model_calls=1,
         )
 
     return step

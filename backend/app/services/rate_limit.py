@@ -6,9 +6,9 @@ from app import config
 from app.services import supabase_client, usage_store
 from app.services.auth import AuthenticatedUser
 
-# Enforced spend caps (Phase 16.3). Every paid OpenAI call records a row in
-# usage_metrics (usage_store), so counting today's rows — globally and per user —
-# gives a direct, restart-proof bound on generation spend. This is the real abuse
+# Enforced spend caps (Phase 16.3). usage_metrics stores actual model-call counts,
+# so summing today's values globally and per user gives a restart-proof spend
+# bound even when one verification requires several Luna turns. This is the abuse
 # gate that sits on top of the login requirement: login makes spend attributable,
 # these caps bound it. See config.MAX_LLM_CALLS_* for the tunable limits.
 #
@@ -30,7 +30,7 @@ _GLOBAL_LIMIT_MESSAGE = (
 
 
 def enforce_llm_quota(user: AuthenticatedUser | None) -> None:
-    """Raise 429 if today's paid-call count is at the global or per-user cap.
+    """Raise 429 if today's paid model-call count is at either daily cap.
 
     Call at the START of every paid generation endpoint, before doing the work.
     No-op when Supabase is unconfigured (dev). Fails OPEN on a counting error: a

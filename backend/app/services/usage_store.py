@@ -45,6 +45,7 @@ class LifetimeUsage:
     reasoning_tokens: int = 0
     total_tokens: int = 0
     runs: int = 0
+    model_calls: int = 0
 
 
 # Reads the ledger file into a LifetimeUsage. A missing file is the normal
@@ -68,12 +69,14 @@ def _read(path: Path) -> LifetimeUsage:
         value = raw.get(key, 0)
         return value if isinstance(value, int) else 0
 
+    runs = field("runs")
     return LifetimeUsage(
         prompt_tokens=field("prompt_tokens"),
         completion_tokens=field("completion_tokens"),
         reasoning_tokens=field("reasoning_tokens"),
         total_tokens=field("total_tokens"),
-        runs=field("runs"),
+        runs=runs,
+        model_calls=field("model_calls") if "model_calls" in raw else runs,
     )
 
 
@@ -89,6 +92,7 @@ def _write(path: Path, totals: LifetimeUsage) -> None:
         "reasoning_tokens": totals.reasoning_tokens,
         "total_tokens": totals.total_tokens,
         "runs": totals.runs,
+        "model_calls": totals.model_calls,
     }
     temp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     os.replace(temp_path, path)
@@ -97,20 +101,20 @@ def _write(path: Path, totals: LifetimeUsage) -> None:
 # ── Supabase-backed ledger (Phase 15.7) ─────────────────────────────────────
 # When Supabase is configured, the append-only usage_metrics table replaces the
 # JSON file (which does not survive multiple backend instances). record() inserts a
-# row; get_total() SUMs the columns and counts rows. The exact record()/get_total()
+# run row with its actual model-call count; get_total() sums both. The interfaces
 # signatures and the LifetimeUsage return shape are unchanged, so routes and the
 # token panel don't change. This stays GLOBAL (no user_id) to match the JSON
 # ledger's "what this backend spent" semantics; per-user attribution is a later add.
 
 
-# SUM the token columns and count the rows for the lifetime total. Reads only the
-# four numeric columns (each row is one recorded run).
+# SUM the token/model-call columns and count rows for user-visible lifetime runs.
 def _supabase_total() -> LifetimeUsage:
     client = supabase_client.get_client()
     result = (
         client.table("usage_metrics")
         .select(
-            "prompt_tokens, completion_tokens, reasoning_tokens, total_tokens"
+            "prompt_tokens, completion_tokens, reasoning_tokens, total_tokens, "
+            "model_calls"
         )
         .execute()
     )
@@ -125,19 +129,25 @@ def _supabase_total() -> LifetimeUsage:
         reasoning_tokens=column("reasoning_tokens"),
         total_tokens=column("total_tokens"),
         runs=len(rows),
+        model_calls=column("model_calls"),
     )
 
 
 # Append one run's usage as a new row. user_id attributes the paid call to the
 # signed-in user (Phase 16.3) so the per-user daily quota can count it; it stays
 # None (column left null) on the unauthenticated dev path.
-def _supabase_record(usage: TokenUsage, user_id: str | None = None) -> None:
+def _supabase_record(
+    usage: TokenUsage,
+    user_id: str | None = None,
+    model_calls: int = 1,
+) -> None:
     client = supabase_client.get_client()
     row = {
         "prompt_tokens": usage.prompt_tokens,
         "completion_tokens": usage.completion_tokens,
         "reasoning_tokens": usage.reasoning_tokens,
         "total_tokens": usage.total_tokens,
+        "model_calls": max(model_calls, 0),
     }
     if user_id is not None:
         row["user_id"] = user_id
@@ -151,21 +161,19 @@ def _today_start_iso() -> str:
     return start.isoformat()
 
 
-# Counts paid-call rows recorded so far today (Phase 16.3 spend caps). With a
-# user_id it counts that user's calls (the per-user quota); without one it counts
-# every user's calls (the global cap). Supabase-only — the caller (rate_limit)
-# gates on is_configured() first, so this is never reached on the JSON dev path.
+# Sums model calls recorded today. With a user_id it scopes to that user's quota;
+# without one it returns the global count. Supabase-only.
 def calls_today(user_id: str | None = None) -> int:
     client = supabase_client.get_client()
     query = (
         client.table("usage_metrics")
-        .select("id", count="exact")
+        .select("model_calls")
         .gte("recorded_at", _today_start_iso())
     )
     if user_id is not None:
         query = query.eq("user_id", user_id)
     result = query.execute()
-    return result.count or 0
+    return sum(int(row.get("model_calls") or 0) for row in (result.data or []))
 
 
 # Returns the lifetime totals for the usage endpoint. Read-only. Uses Supabase when
@@ -181,7 +189,11 @@ def get_total(path: Path = _DEFAULT_PATH) -> LifetimeUsage:
 
 # Adds one run's usage to the ledger and returns the new lifetime totals. Holds the
 # lock around the read-modify-write so concurrent calls cannot lose an update.
-def add(usage: TokenUsage, path: Path = _DEFAULT_PATH) -> LifetimeUsage:
+def add(
+    usage: TokenUsage,
+    path: Path = _DEFAULT_PATH,
+    model_calls: int = 1,
+) -> LifetimeUsage:
     with _lock:
         current = _read(path)
         updated = LifetimeUsage(
@@ -190,6 +202,7 @@ def add(usage: TokenUsage, path: Path = _DEFAULT_PATH) -> LifetimeUsage:
             reasoning_tokens=current.reasoning_tokens + usage.reasoning_tokens,
             total_tokens=current.total_tokens + usage.total_tokens,
             runs=current.runs + 1,
+            model_calls=current.model_calls + max(model_calls, 0),
         )
         _write(path, updated)
         return updated
@@ -201,9 +214,15 @@ def add(usage: TokenUsage, path: Path = _DEFAULT_PATH) -> LifetimeUsage:
 # discard an already-completed (already-paid-for) generation, so any storage
 # failure is logged and swallowed rather than raised.
 def record(
-    usage: TokenUsage, path: Path = _DEFAULT_PATH, user_id: str | None = None
+    usage: TokenUsage,
+    path: Path = _DEFAULT_PATH,
+    user_id: str | None = None,
+    model_calls: int | None = None,
 ) -> None:
-    if usage == EMPTY_USAGE:
+    resolved_model_calls = (
+        0 if usage == EMPTY_USAGE else 1
+    ) if model_calls is None else max(model_calls, 0)
+    if usage == EMPTY_USAGE and resolved_model_calls <= 0:
         return
     # Prefer Supabase when configured; a failed ledger write must never discard an
     # already-completed (already-paid-for) generation, so failures are logged and
@@ -211,11 +230,11 @@ def record(
     # for the per-user daily quota (Phase 16.3); the JSON fallback is global-only.
     if supabase_client.is_configured():
         try:
-            _supabase_record(usage, user_id)
+            _supabase_record(usage, user_id, resolved_model_calls)
         except Exception as exc:  # noqa: BLE001 - see above; never raise here
             logger.warning("Could not record usage to Supabase: %s", exc)
         return
     try:
-        add(usage, path)
+        add(usage, path, resolved_model_calls)
     except OSError as exc:  # pragma: no cover - disk/permission failure
         logger.warning("Could not record usage to the lifetime ledger: %s", exc)

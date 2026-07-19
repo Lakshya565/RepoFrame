@@ -8,9 +8,8 @@ from app.schemas.usage import UsageTotals
 
 # Phase 12 agentic claim verification. The verifier reviews the generated outputs
 # (resume bullets, README intro, portfolio blurb, LinkedIn description) and labels
-# each factual claim by how well the already-selected repo evidence and the user's
-# context support it. This is what makes RepoFrame an agentic analysis tool rather
-# than a generic AI writer.
+# each factual claim by how well the initial and investigator-read repo evidence,
+# plus the user's context, support it.
 
 # How well a claim is backed. Kept as a closed set so the frontend can map each
 # status to a fixed badge and the model cannot invent its own labels:
@@ -54,9 +53,23 @@ class ClaimVerificationResult(BaseModel):
     verifications: list[ClaimVerification]
 
 
+# Transparent accounting for the bounded repository investigation. Paths are safe
+# to expose because verification already returns evidence paths from the same
+# user-authorized repository.
+class InvestigationSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    model_calls: int = Field(0, alias="modelCalls", ge=0)
+    tool_calls: int = Field(0, alias="toolCalls", ge=0)
+    additional_files_inspected: list[str] = Field(
+        default_factory=list,
+        alias="additionalFilesInspected",
+    )
+
+
 # Request body for verification. Takes the repo URL (the deterministic pipeline is
-# re-run to rebuild the already-selected evidence bundle, exactly like profile
-# generation), the user context (for claims only the user can confirm), and the
+# re-run to rebuild the initial evidence and safe repository index), the user
+# context (for claims only the user can confirm), and the
 # generated outputs whose claims are to be checked. An optional sections list
 # scopes a per-tab verification to specific output tabs; None/empty means verify
 # every tab that has content.
@@ -81,3 +94,6 @@ class VerifyClaimsResponse(BaseModel):
     model: str
     estimated_input_tokens: int = Field(alias="estimatedInputTokens")
     usage: UsageTotals
+    investigation: InvestigationSummary = Field(
+        default_factory=InvestigationSummary
+    )

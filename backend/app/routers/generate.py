@@ -28,14 +28,19 @@ from app.schemas.profile import (
     ProjectProfile,
 )
 from app.schemas.usage import UsageTotals
-from app.schemas.verify import VerifyClaimsRequest, VerifyClaimsResponse
+from app.schemas.verify import (
+    InvestigationSummary,
+    VerifyClaimsRequest,
+    VerifyClaimsResponse,
+)
 from app.services import metrics_store, rate_limit, usage_store
 from app.services.claim_verifier import (
     VERIFY_STAGE_EVIDENCE,
+    VerificationRunError,
     verify_claims,
 )
+from app.services.evidence_investigator import build_evidence_workspace
 from app.services.file_content_service import (
-    RepoEvidenceCollection,
     collect_file_evidence,
 )
 from app.services.file_ranker import rank_important_files
@@ -146,7 +151,11 @@ def generate_profile(
 
     # Record the real usage to the lifetime ledger (safe: a ledger failure never
     # discards the completed generation), attributed to the user for the daily quota.
-    usage_store.record(usage, user_id=user.user_id if user else None)
+    usage_store.record(
+        usage,
+        user_id=user.user_id if user else None,
+        model_calls=1,
+    )
     # Profile generation is the canonical "analyze a repo" action (Phase 13).
     metrics_store.increment(
         repos_analyzed=1,
@@ -203,7 +212,11 @@ def generate_outputs(
     except LLMError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    usage_store.record(usage, user_id=user.user_id if user else None)
+    usage_store.record(
+        usage,
+        user_id=user.user_id if user else None,
+        model_calls=1,
+    )
     metrics_store.increment(outputs_generated=1)
 
     return GenerateOutputsResponse(
@@ -235,7 +248,11 @@ def revise_output_endpoint(
     except LLMError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    usage_store.record(usage, user_id=user.user_id if user else None)
+    usage_store.record(
+        usage,
+        user_id=user.user_id if user else None,
+        model_calls=1,
+    )
 
     return GenerateOutputsResponse(
         outputs=outputs,
@@ -262,7 +279,11 @@ def generate_interview_prep_endpoint(
     except LLMError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    usage_store.record(usage, user_id=user.user_id if user else None)
+    usage_store.record(
+        usage,
+        user_id=user.user_id if user else None,
+        model_calls=1,
+    )
 
     return GenerateInterviewPrepResponse(
         topics=topics,
@@ -290,39 +311,17 @@ def revise_interview_prep_endpoint(
     except LLMError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    usage_store.record(usage, user_id=user.user_id if user else None)
+    usage_store.record(
+        usage,
+        user_id=user.user_id if user else None,
+        model_calls=1,
+    )
 
     return GenerateInterviewPrepResponse(
         topics=topics,
         model=OPENAI_MODEL,
         estimated_input_tokens=estimated_input_tokens,
         usage=UsageTotals.from_usage(usage),
-    )
-
-
-# Re-runs the deterministic pipeline (parse -> metadata -> tree -> rank -> bounded
-# evidence) to rebuild the same already-selected evidence bundle the profile was
-# grounded in. Shared by both verify endpoints (one-shot and streaming) so the
-# evidence rebuild stays identical. Raises the same domain errors the callers map.
-def _gather_verify_evidence(
-    repo_url: str, user: AuthenticatedUser | None
-) -> RepoEvidenceCollection:
-    parsed_repo = parse_github_repo_url(repo_url)
-    # Set the installation token in THIS call's thread (the streaming variant runs
-    # this on a worker thread), so the fetches below can reach a private repo.
-    repo_access.apply_repo_access(user, parsed_repo.owner, parsed_repo.repo)
-    metadata = fetch_repo_metadata(parsed_repo.owner, parsed_repo.repo)
-    tree = fetch_repo_tree(
-        parsed_repo.owner,
-        parsed_repo.repo,
-        metadata.default_branch,
-    )
-    ranked_files = rank_important_files(tree.files)
-    return collect_file_evidence(
-        parsed_repo.owner,
-        parsed_repo.repo,
-        metadata.default_branch,
-        ranked_files,
     )
 
 
@@ -352,10 +351,13 @@ def verify_claims_endpoint(
 ) -> VerifyClaimsResponse:
     rate_limit.enforce_llm_quota(user)
     try:
-        evidence = _gather_verify_evidence(request.repo_url, user)
+        workspace = build_evidence_workspace(request.repo_url, user)
         with metrics_store.timed("llm"):
-            verifications, estimated_input_tokens, usage = verify_claims(
-                evidence, request.outputs, request.user_context, request.sections
+            run = verify_claims(
+                workspace,
+                request.outputs,
+                request.user_context,
+                request.sections,
             )
     except RepoUrlParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -365,17 +367,35 @@ def verify_claims_endpoint(
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except GitHubFileContentError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except VerificationRunError as exc:
+        usage_store.record(
+            exc.usage,
+            user_id=user.user_id if user else None,
+            model_calls=exc.investigation.model_calls,
+        )
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except LLMError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    usage_store.record(usage, user_id=user.user_id if user else None)
-    _record_claim_metrics(verifications)
+    usage_store.record(
+        run.usage,
+        user_id=user.user_id if user else None,
+        model_calls=run.investigation.model_calls,
+    )
+    _record_claim_metrics(run.verifications)
 
     return VerifyClaimsResponse(
-        verifications=verifications,
+        verifications=run.verifications,
         model=OPENAI_MODEL,
-        estimated_input_tokens=estimated_input_tokens,
-        usage=UsageTotals.from_usage(usage),
+        estimated_input_tokens=run.estimated_input_tokens,
+        usage=UsageTotals.from_usage(run.usage),
+        investigation=InvestigationSummary(
+            model_calls=run.investigation.model_calls,
+            tool_calls=run.investigation.tool_calls,
+            additional_files_inspected=(
+                run.investigation.additional_files_inspected
+            ),
+        ),
     )
 
 
@@ -412,28 +432,39 @@ async def verify_claims_stream_endpoint(
             # The evidence rebuild is the first real stage; signal it before the
             # (blocking) GitHub work so the checklist lights up immediately.
             emit({"type": "progress", "stage": VERIFY_STAGE_EVIDENCE, "detail": None})
-            evidence = _gather_verify_evidence(request.repo_url, user)
+            workspace = build_evidence_workspace(request.repo_url, user)
 
             def on_progress(stage: str, detail: str | None) -> None:
                 emit({"type": "progress", "stage": stage, "detail": detail})
 
             with metrics_store.timed("llm"):
-                verifications, estimated_input_tokens, usage = verify_claims(
-                    evidence,
+                run = verify_claims(
+                    workspace,
                     request.outputs,
                     request.user_context,
                     request.sections,
                     progress=on_progress,
                 )
 
-            usage_store.record(usage, user_id=user.user_id if user else None)
-            _record_claim_metrics(verifications)
+            usage_store.record(
+                run.usage,
+                user_id=user.user_id if user else None,
+                model_calls=run.investigation.model_calls,
+            )
+            _record_claim_metrics(run.verifications)
 
             response = VerifyClaimsResponse(
-                verifications=verifications,
+                verifications=run.verifications,
                 model=OPENAI_MODEL,
-                estimated_input_tokens=estimated_input_tokens,
-                usage=UsageTotals.from_usage(usage),
+                estimated_input_tokens=run.estimated_input_tokens,
+                usage=UsageTotals.from_usage(run.usage),
+                investigation=InvestigationSummary(
+                    model_calls=run.investigation.model_calls,
+                    tool_calls=run.investigation.tool_calls,
+                    additional_files_inspected=(
+                        run.investigation.additional_files_inspected
+                    ),
+                ),
             )
             emit({"type": "result", **response.model_dump(by_alias=True)})
         except RepoUrlParseError as exc:
@@ -442,8 +473,16 @@ async def verify_claims_stream_endpoint(
             GitHubMetadataError,
             GitHubTreeError,
             GitHubFileContentError,
-            LLMError,
         ) as exc:
+            emit({"type": "error", "detail": str(exc), "status": exc.status_code})
+        except VerificationRunError as exc:
+            usage_store.record(
+                exc.usage,
+                user_id=user.user_id if user else None,
+                model_calls=exc.investigation.model_calls,
+            )
+            emit({"type": "error", "detail": str(exc), "status": exc.status_code})
+        except LLMError as exc:
             emit({"type": "error", "detail": str(exc), "status": exc.status_code})
         except Exception:  # noqa: BLE001 - last-resort guard so the stream always ends
             logger.exception("Unexpected error during streamed claim verification")

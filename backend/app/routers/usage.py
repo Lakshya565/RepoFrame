@@ -18,4 +18,5 @@ def get_usage_total() -> LifetimeUsageResponse:
         reasoning_tokens=totals.reasoning_tokens,
         total_tokens=totals.total_tokens,
         runs=totals.runs,
+        model_calls=totals.model_calls,
     )

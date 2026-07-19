@@ -4,6 +4,7 @@ import {
   type InterviewTopic,
   type ProjectProfileData,
   type UsageTotals,
+  type VerifyInvestigation,
   type VerifyProgressEvent,
 } from "@/lib/repo-api";
 import { DEMO_PROJECT } from "@/lib/demo-fixture";
@@ -63,25 +64,42 @@ export async function demoGenerateInterview(): Promise<{
   return { topics: DEMO_INTERVIEW, usage: ZERO_USAGE };
 }
 
-// Replays the four verification stages (with a couple of "checking" detail lines,
-// like the live agent inspecting evidence) before resolving with the frozen
-// findings, so the agent checklist animates identically to a real run.
+// Replays the four investigation stages with the same search/read detail strings
+// as the live backend, so the checklist demonstrates the real workflow.
 export async function demoVerifyClaims(
   onProgress: (event: VerifyProgressEvent) => void,
-): Promise<{ verifications: ClaimVerification[]; usage: UsageTotals }> {
+): Promise<{
+  verifications: ClaimVerification[];
+  usage: UsageTotals;
+  investigation: VerifyInvestigation;
+}> {
   onProgress({ stage: "gathering_evidence", detail: null });
   await delay(DEMO_VERIFY_STEP_MS);
 
   onProgress({ stage: "analyzing", detail: null });
   await delay(DEMO_VERIFY_STEP_MS);
 
-  onProgress({ stage: "checking", detail: "backend/app/main.py" });
+  onProgress({
+    stage: "checking",
+    detail: "Searching repository paths for: usage accounting",
+  });
   await delay(DEMO_VERIFY_STEP_MS);
-  onProgress({ stage: "checking", detail: "backend/app/services/usage_store.py" });
+  onProgress({
+    stage: "checking",
+    detail: "Reading backend/app/services/usage_store.py",
+  });
   await delay(DEMO_VERIFY_STEP_MS);
 
   onProgress({ stage: "compiling", detail: null });
   await delay(DEMO_VERIFY_STEP_MS);
 
-  return { verifications: DEMO_VERIFICATIONS, usage: ZERO_USAGE };
+  return {
+    verifications: DEMO_VERIFICATIONS,
+    usage: ZERO_USAGE,
+    investigation: {
+      modelCalls: 3,
+      toolCalls: 2,
+      additionalFilesInspected: ["backend/app/services/usage_store.py"],
+    },
+  };
 }

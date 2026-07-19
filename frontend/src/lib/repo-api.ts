@@ -286,6 +286,7 @@ export type UsageTotals = {
 // runs the backend has recorded.
 export type LifetimeUsage = UsageTotals & {
   runs: number;
+  modelCalls: number;
 };
 
 export type GenerateProfileResponse = ParsedRepoResponse & {
@@ -426,20 +427,29 @@ export type ClaimVerification = {
   suggestedRevision: string | null;
 };
 
+// Bounded-work audit returned with every verification result. It makes the
+// agent's actual model/tool activity visible without exposing prompts or secrets.
+export type VerifyInvestigation = {
+  modelCalls: number;
+  toolCalls: number;
+  additionalFilesInspected: string[];
+};
+
 export type VerifyClaimsResponse = {
   verifications: ClaimVerification[];
   model: string;
   estimatedInputTokens: number;
   usage: UsageTotals;
+  investigation: VerifyInvestigation;
 };
 
-// The real progress stages the verification agent passes through, in display
-// order. Mirrors the backend's closed stage vocabulary (claim_verifier) so the UI
-// checklist maps each event to a fixed step:
-//   - gathering_evidence: the deterministic pipeline rebuilds the repo evidence.
-//   - analyzing: the agent reads the writeup + evidence and extracts the claims.
-//   - checking: the agent searches/reads the evidence (detail says what, live).
-//   - compiling: the agent is producing its final verdict.
+// The real progress stages the Evidence Investigator passes through, in display
+// order. Mirrors the backend's closed vocabulary so the UI maps each event to a
+// fixed step:
+//   - gathering_evidence: build initial evidence and a safe repository index.
+//   - analyzing: review claims and decide whether evidence gaps need tools.
+//   - checking: search/read targeted evidence (detail says what, live).
+//   - compiling: run the separate tool-free reasoning verdict.
 export type VerifyStage =
   | "gathering_evidence"
   | "analyzing"
@@ -461,13 +471,10 @@ type VerifyStreamEvent =
   | { type: "progress"; stage: VerifyStage; detail: string | null }
   | { type: "error"; detail: string; status: number };
 
-// Runs the bounded verification agent over the generated outputs via the STREAMING
-// endpoint: onProgress fires as each real stage is reached (so the UI checklist
-// tracks the agent's actual work), and the promise resolves with the final result
-// once the stream completes. Like interview prep it is opt-in — nothing runs until
-// an explicit press, so it never spends tokens in the default flow. The backend
-// rebuilds the repo evidence from the URL. A streamed { type: "error" } frame (or a
-// pre-stream HTTP error) rejects with the backend's message.
+// Runs the bounded Evidence Investigator via the streaming endpoint. onProgress
+// fires for each real stage/tool detail, and the promise resolves with the final
+// report. It remains opt-in, and streamed or pre-stream errors reject with the
+// backend's message.
 export async function verifyClaimsStream(
   repoUrl: string,
   userContext: UserContext,
@@ -535,6 +542,7 @@ export async function verifyClaimsStream(
             model: event.model,
             estimatedInputTokens: event.estimatedInputTokens,
             usage: event.usage,
+            investigation: event.investigation,
           };
         }
       }

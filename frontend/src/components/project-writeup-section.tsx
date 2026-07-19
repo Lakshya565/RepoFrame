@@ -29,6 +29,7 @@ import {
   type GeneratedOutputs,
   type OutputSection,
   type ProjectProfileData,
+  type VerifyInvestigation,
   type VerifyStage,
 } from "@/lib/repo-api";
 import { hasUserFilledContext, userContextEquals } from "@/lib/user-context";
@@ -139,7 +140,7 @@ export function ProjectWriteupSection({
     demo,
   });
 
-  // Whether anything has been generated yet. Gates the verification agent (there
+  // Whether anything has been generated yet. Gates the Evidence Investigator (there
   // must be a draft to check) and seeds a sensible landing step for returning
   // users whose outputs survived tab navigation.
   const hasAnyOutput = OUTPUT_SECTIONS.some((section) =>
@@ -161,11 +162,18 @@ export function ProjectWriteupSection({
     () => hasUserFilledContext(context) || hasAnyOutput,
   );
 
-  // Live verification-agent progress from the streaming verify endpoint. Transient
+  // Live Evidence Investigator progress from the streaming verify endpoint. Transient
   // local UI state (the settled verifications themselves live in the provider);
   // both reset when a run starts and again when it ends.
   const [verifyStage, setVerifyStage] = useState<VerifyStage | null>(null);
   const [verifyDetail, setVerifyDetail] = useState<string | null>(null);
+  // Tracks only stages the stream actually emitted. This prevents the checklist
+  // from claiming targeted lookup ran when the initial evidence was sufficient.
+  const [verifyVisitedStages, setVerifyVisitedStages] = useState<VerifyStage[]>(
+    [],
+  );
+  const [verifyInvestigation, setVerifyInvestigation] =
+    useState<VerifyInvestigation | null>(null);
 
   // Step access rules: Context is always open; Generate unlocks once Context is
   // acknowledged. Completed steps stay accessible (jump back); a locked step
@@ -417,7 +425,7 @@ export function ProjectWriteupSection({
     setInterviewRevert({ topics: current, reverted: !interviewRevert.reverted });
   }
 
-  // Runs the bounded verification agent over every generated output. Opt-in: it
+  // Runs the bounded Evidence Investigator over every generated output. Opt-in: it
   // only fires on an explicit press, never as part of the default flow, so it
   // cannot spend tokens without a deliberate click. Uses the STREAMING endpoint so
   // the agent panel's checklist tracks the agent's real progress (rebuild evidence
@@ -433,16 +441,22 @@ export function ProjectWriteupSection({
     // before the first server event arrives.
     setVerifyStage("gathering_evidence");
     setVerifyDetail(null);
+    setVerifyVisitedStages(["gathering_evidence"]);
+    setVerifyInvestigation(null);
 
     try {
       const onProgress = (event: { stage: VerifyStage; detail: string | null }) => {
         setVerifyStage(event.stage);
         setVerifyDetail(event.detail);
+        setVerifyVisitedStages((current) =>
+          current.includes(event.stage) ? current : [...current, event.stage],
+        );
       };
       const response = demo
         ? await demoVerifyClaims(onProgress)
         : await verifyClaimsStream(repoUrl, context, outputs, { onProgress });
       setVerifications(response.verifications);
+      setVerifyInvestigation(response.investigation);
       addUsage(response.usage);
     } catch (caught) {
       setError(messageOf(caught, "RepoFrame could not verify the claims."));
@@ -450,6 +464,7 @@ export function ProjectWriteupSection({
       setBusyTask(null);
       setVerifyStage(null);
       setVerifyDetail(null);
+      setVerifyVisitedStages([]);
       refreshLifetime();
     }
   }
@@ -529,6 +544,8 @@ export function ProjectWriteupSection({
               onRun={handleVerifyClaims}
               running={busyTask?.kind === "verify"}
               stage={verifyStage}
+              visitedStages={verifyVisitedStages}
+              investigation={verifyInvestigation}
               verifications={verifications}
             />
           </div>

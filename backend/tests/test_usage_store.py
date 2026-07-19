@@ -42,6 +42,7 @@ class UsageStoreTests(unittest.TestCase):
         self.assertEqual(totals.total_tokens, 33)
         # Each add() is one recorded run.
         self.assertEqual(totals.runs, 2)
+        self.assertEqual(totals.model_calls, 2)
 
     def test_record_skips_zero_usage(self) -> None:
         # A zero-usage run (e.g. a verify with no claims) must not inflate the
@@ -135,6 +136,7 @@ class SupabaseUsageStoreTests(unittest.TestCase):
         self.assertEqual(total.prompt_tokens, 11)
         self.assertEqual(total.total_tokens, 33)
         self.assertEqual(total.runs, 2)
+        self.assertEqual(total.model_calls, 2)
         # Only the two non-empty runs were inserted.
         self.assertEqual(len(fake.rows), 2)
 
@@ -166,7 +168,31 @@ class SupabaseUsageStoreTests(unittest.TestCase):
             self.assertEqual(usage_store.calls_today("user-2"), 1)
             self.assertEqual(usage_store.calls_today("user-3"), 0)
 
+    def test_calls_today_sums_multi_turn_investigations(self) -> None:
+        fake = _FakeClient()
+        with patch.object(
+            supabase_client,
+            "is_configured",
+            return_value=True,
+        ), patch.object(
+            supabase_client,
+            "get_client",
+            return_value=fake,
+        ):
+            usage_store.record(
+                TokenUsage(20, 10, 2, 30),
+                user_id="user-1",
+                model_calls=3,
+            )
+            usage_store.record(
+                TokenUsage(2, 1, 0, 3),
+                user_id="user-1",
+                model_calls=1,
+            )
+
+            self.assertEqual(usage_store.calls_today(), 4)
+            self.assertEqual(usage_store.calls_today("user-1"), 4)
+
 
 if __name__ == "__main__":
     unittest.main()
-

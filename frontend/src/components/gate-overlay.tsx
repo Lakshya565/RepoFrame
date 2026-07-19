@@ -41,7 +41,7 @@ export function GateOverlay({ children, title, className }: GateOverlayProps) {
       <div
         aria-hidden
         inert
-        className="pointer-events-none select-none blur-[5px] opacity-80"
+        className="pointer-events-none select-none blur-[3px] opacity-80"
       >
         {children}
       </div>

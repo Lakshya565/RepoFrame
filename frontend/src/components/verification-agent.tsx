@@ -1,10 +1,11 @@
 "use client";
 
 import { useReducedMotion } from "motion/react";
-import { Check, Loader2, ShieldCheck } from "lucide-react";
+import { Check, Loader2, Minus, ShieldCheck } from "lucide-react";
 
 import {
   type ClaimVerification,
+  type VerifyInvestigation,
   type VerifyStage,
 } from "@/lib/repo-api";
 import { Card } from "@/components/ui/card";
@@ -15,24 +16,37 @@ import { cn } from "@/lib/utils";
 
 // The agent's stages in display order, each tied to a real backend progress event
 // (see VerifyStage in repo-api / claim_verifier). The checklist is driven by the
-// stage the backend is ACTUALLY on — completed stages get a check, the current one
-// spins, later ones wait — so it tracks genuine work instead of a timer. The
-// "checking" stage also shows a live detail line of what the agent is inspecting.
-const AGENT_STAGES: readonly { id: VerifyStage; label: string }[] = [
-  { id: "gathering_evidence", label: "Reading the repository evidence" },
-  { id: "analyzing", label: "Pulling the claims out of your writeup" },
-  { id: "checking", label: "Checking each claim against the evidence" },
-  { id: "compiling", label: "Compiling the verification report" },
+// stage the backend actually emitted: completed stages get a check, the current
+// one spins, and skipped targeted lookup stays visibly skipped.
+const AGENT_STAGES: readonly {
+  id: VerifyStage;
+  label: string;
+  skippedLabel?: string;
+}[] = [
+  { id: "gathering_evidence", label: "Building the evidence workspace" },
+  { id: "analyzing", label: "Reviewing claims and identifying gaps" },
+  {
+    id: "checking",
+    label: "Searching and reading targeted evidence",
+    skippedLabel: "No additional evidence lookup needed",
+  },
+  { id: "compiling", label: "Reasoning over the final verdict" },
 ];
 
 type VerificationAgentProps = {
   // null until a verification has been run; an empty array means "ran, no claims".
   verifications: ClaimVerification[] | null;
+  // Audit metadata for the settled run: actual model/tool turns and any files the
+  // investigator read beyond the initial deterministic evidence bundle.
+  investigation: VerifyInvestigation | null;
   // True while the verification call is in flight.
   running: boolean;
   // The real stage the agent is on (from the stream), or null before the first
   // event lands. Drives which checklist item is active.
   stage: VerifyStage | null;
+  // Stages actually emitted during this run. Earlier stages count as complete
+  // only when present here; otherwise the backend intentionally skipped them.
+  visitedStages: VerifyStage[];
   // The live detail for the current stage (e.g. the term being searched), or null.
   detail: string | null;
   // True when there is at least one generated output to check.
@@ -43,16 +57,15 @@ type VerificationAgentProps = {
   onRun: () => void;
 };
 
-// The verification step, presented as a first-class agentic workflow rather than a
-// quiet button. A branded panel explains what the agent does, a single prominent
-// action runs it over everything generated, and a live checklist — driven by real
-// streamed progress — shows the agent working while the call is in flight. The
-// per-claim findings render below in the existing ClaimVerificationPanel. Opt-in:
-// nothing runs (and no tokens are spent) until the user presses the button.
+// The investigator is a first-class evidence workflow rather than a quiet button.
+// Its live checklist is driven by streamed progress, and the settled report renders
+// below. It remains opt-in: nothing runs until the user presses the button.
 export function VerificationAgent({
   verifications,
+  investigation,
   running,
   stage,
+  visitedStages,
   detail,
   hasOutputs,
   busy,
@@ -63,7 +76,7 @@ export function VerificationAgent({
   const canRun = hasOutputs && !busy;
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <Card beam className="border-brand/30 bg-brand/[0.04] p-6">
         <div className="flex items-start gap-4">
           <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-brand/10 text-brand [&_svg]:size-5">
@@ -71,16 +84,15 @@ export function VerificationAgent({
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-base font-semibold">Verification agent</h3>
+              <h3 className="text-base font-semibold">Evidence Investigator</h3>
               <Badge variant="outline" className="border-brand/40 text-brand">
-                Agentic workflow
+                Evidence-backed audit
               </Badge>
             </div>
             <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              An agent re-reads your repository and checks every claim in the
-              generated writeup against the real evidence — flagging anything
-              unsupported and suggesting fixes. This is what keeps RepoFrame
-              grounded instead of guessing.
+              Starts with RepoFrame&apos;s selected evidence, searches the
+              repository only when a claim has a gap, and reads the most relevant
+              files before issuing an evidence-backed verdict.
             </p>
           </div>
         </div>
@@ -89,24 +101,71 @@ export function VerificationAgent({
           <Button variant="brand" disabled={!canRun} onClick={onRun}>
             {running ? (
               <>
-                <Loader2 className="animate-spin" />
-                Agent running…
+                <Loader2
+                  data-icon="inline-start"
+                  className={cn(!reduce && "animate-spin")}
+                />
+                Investigating evidence…
               </>
             ) : hasRun ? (
-              "Re-run verification"
+              "Re-run investigation"
             ) : (
-              "Run verification agent"
+              "Run Evidence Investigator"
             )}
           </Button>
           <p className="text-sm text-muted-foreground">
             {hasOutputs
-              ? "Runs only when you ask — no tokens are spent until you start it."
+              ? "Runs only when you ask. It may inspect up to four additional repository files."
               : "Generate at least one output first."}
           </p>
         </div>
 
         {running ? (
-          <AgentSteps reduced={!!reduce} stage={stage} detail={detail} />
+          <AgentSteps
+            reduced={!!reduce}
+            stage={stage}
+            visitedStages={visitedStages}
+            detail={detail}
+          />
+        ) : null}
+
+        {/* A compact settled-run audit makes the agentic work inspectable without
+            turning the card into an operational dashboard. */}
+        {!running && hasRun && investigation ? (
+          <div className="mt-5 flex flex-wrap items-center gap-x-2 gap-y-1 border-t pt-4 text-xs text-muted-foreground">
+            <span>
+              {investigation.modelCalls} model{" "}
+              {investigation.modelCalls === 1 ? "pass" : "passes"}
+            </span>
+            <span aria-hidden>·</span>
+            <span>
+              {investigation.toolCalls} evidence{" "}
+              {investigation.toolCalls === 1 ? "check" : "checks"}
+            </span>
+            <span aria-hidden>·</span>
+            <span>
+              {investigation.additionalFilesInspected.length} additional{" "}
+              {investigation.additionalFilesInspected.length === 1
+                ? "file"
+                : "files"}{" "}
+              read
+            </span>
+            {investigation.additionalFilesInspected.length > 0 ? (
+              <div className="flex w-full flex-wrap items-center gap-1.5 pt-1">
+                <span className="font-medium text-foreground">
+                  Additional files read
+                </span>
+                {investigation.additionalFilesInspected.map((path) => (
+                  <code
+                    className="max-w-full break-all rounded border bg-muted/50 px-1.5 py-0.5 font-mono text-[11px] text-foreground"
+                    key={path}
+                  >
+                    {path}
+                  </code>
+                ))}
+              </div>
+            ) : null}
+          </div>
         ) : null}
       </Card>
 
@@ -122,15 +181,18 @@ type AgentStepsProps = {
   // The agent's current real stage, or null before the first event arrives (which
   // we treat as the first stage just starting).
   stage: VerifyStage | null;
+  visitedStages: VerifyStage[];
   detail: string | null;
 };
 
-// The live "agent working" checklist, driven entirely by the real stage prop (no
-// timer, no internal state — so no setState-in-effect). Stages before the active
-// one show a check, the active one spins, later ones wait. The active stage's live
-// detail (e.g. the term being searched) shows as a sub-line. Under reduced motion
-// it collapses to a single static line naming the current stage.
-function AgentSteps({ reduced, stage, detail }: AgentStepsProps) {
+// The live checklist is driven by real streamed progress, with no timer or
+// internal effects. Only emitted stages complete; skipped lookup stays explicit.
+function AgentSteps({
+  reduced,
+  stage,
+  visitedStages,
+  detail,
+}: AgentStepsProps) {
   // Before the first event lands, treat the run as sitting on the first stage.
   const activeIndex = stage
     ? AGENT_STAGES.findIndex((item) => item.id === stage)
@@ -140,8 +202,11 @@ function AgentSteps({ reduced, stage, detail }: AgentStepsProps) {
   if (reduced) {
     const active = AGENT_STAGES[safeIndex];
     return (
-      <p className="mt-5 flex items-center gap-2 border-t pt-4 text-sm text-muted-foreground">
-        <Loader2 className="size-4 animate-spin text-brand" />
+      <p
+        aria-live="polite"
+        className="mt-5 flex items-center gap-2 border-t pt-4 text-sm text-muted-foreground"
+      >
+        <Loader2 className="size-4 text-brand" />
         {active.label}
         {detail ? <span className="text-muted-foreground/80">— {detail}</span> : null}
       </p>
@@ -149,10 +214,16 @@ function AgentSteps({ reduced, stage, detail }: AgentStepsProps) {
   }
 
   return (
-    <ul className="mt-5 space-y-2.5 border-t pt-4">
+    <ul
+      aria-label="Investigation progress"
+      className="mt-5 flex flex-col gap-2.5 border-t pt-4"
+    >
       {AGENT_STAGES.map((item, index) => {
-        const done = index < safeIndex;
         const active = index === safeIndex;
+        const visited = visitedStages.includes(item.id);
+        const done = visited && !active;
+        const skipped = index < safeIndex && !visited;
+        const label = skipped ? (item.skippedLabel ?? item.label) : item.label;
         return (
           <li
             className={cn(
@@ -161,23 +232,33 @@ function AgentSteps({ reduced, stage, detail }: AgentStepsProps) {
             )}
             key={item.id}
           >
-            <span className="flex items-center gap-2.5">
+            <span
+              aria-current={active ? "step" : undefined}
+              aria-live={active ? "polite" : undefined}
+              className="flex items-center gap-2.5"
+            >
               {done ? (
                 <Check className="size-4 shrink-0 text-brand" />
               ) : active ? (
                 <Loader2 className="size-4 shrink-0 animate-spin text-brand" />
+              ) : skipped ? (
+                <Minus className="size-4 shrink-0 text-muted-foreground" />
               ) : (
                 <span
                   aria-hidden
                   className="size-4 shrink-0 rounded-full border border-muted-foreground/40"
                 />
               )}
-              {item.label}
+              {label}
             </span>
             {/* Live detail of the agent's current action, shown only on the active
                 stage (mainly the per-tool-call "checking" lines). */}
             {active && detail ? (
-              <span className="mt-1 block truncate pl-[26px] text-xs text-muted-foreground">
+              <span
+                aria-live="polite"
+                className="mt-1 block truncate pl-[26px] text-xs text-muted-foreground"
+                title={detail}
+              >
                 {detail}
               </span>
             ) : null}

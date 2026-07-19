@@ -57,7 +57,7 @@ const STATUS_DISPLAY: Record<
     bar: "bg-amber-500",
   },
   needs_user_confirmation: {
-    label: "Needs confirmation",
+    label: "Needs your confirmation",
     variant: "info",
     Icon: CircleHelp,
     bar: "bg-blue-500",
@@ -88,12 +88,9 @@ const SEVERITY: Record<ClaimStatus, number> = {
   supported: 3,
 };
 
-// The verification agent's findings, presented as a report: a verdict headline, a
-// status-distribution bar with counts, then the claims sorted worst-first and split
-// into "needs attention" and "supported" groups so action items lead. Each claim
-// keeps its evidence, explanation, and the agent's suggested fix. This is what makes
-// RepoFrame feel like an agentic repo-analysis tool rather than a generic AI writer.
-// Renders nothing until a verification has been requested.
+// The Evidence Investigator's findings: a verdict headline, status distribution,
+// and claims sorted worst-first so action items lead. Each row keeps the assessment,
+// evidence, and suggested rewrite legible without changing the report hierarchy.
 export function ClaimVerificationPanel({
   verifications,
   loading,
@@ -105,10 +102,10 @@ export function ClaimVerificationPanel({
   if (loading) {
     return (
       <Card beam className="bg-muted/30 p-6">
-        <h3 className="text-base font-semibold">Verification report</h3>
-        <div className="mt-4 space-y-3">
+        <h3 className="text-base font-semibold">Investigation report</h3>
+        <div className="mt-4 flex flex-col gap-3">
           <p className="text-sm text-muted-foreground">
-            Checking each claim against the repository evidence…
+            Investigating generated claims against repository evidence…
           </p>
           {[0, 1, 2].map((item) => (
             <Skeleton key={item} className="h-20" />
@@ -123,7 +120,7 @@ export function ClaimVerificationPanel({
   if (results.length === 0) {
     return (
       <Card beam className="bg-muted/30 p-6">
-        <h3 className="text-base font-semibold">Verification report</h3>
+        <h3 className="text-base font-semibold">Investigation report</h3>
         <p className="mt-4 text-sm text-muted-foreground">
           No claims were found to verify. Generate some outputs first.
         </p>
@@ -151,7 +148,7 @@ export function ClaimVerificationPanel({
 
   return (
     <Card beam className="bg-muted/30 p-6">
-      <h3 className="text-base font-semibold">Verification report</h3>
+      <h3 className="text-base font-semibold">Investigation report</h3>
       <p className="mt-1 text-sm text-muted-foreground">{verdict}</p>
 
       {/* Status-distribution bar: each status takes a slice proportional to its
@@ -246,23 +243,21 @@ type ClaimRowProps = {
   staggerIndex: number;
 };
 
-// A single verified claim: status badge, the outputs it appears in, the agent's
-// explanation and supporting evidence, and its suggested fix when one is offered.
-// Rows fade/slide in with a small stagger so the report reads as results "landing".
+// A single investigated claim: status badge, affected outputs, assessment,
+// evidence, and a suggested rewrite when one is useful. Rows settle in quickly
+// with a small stagger so results feel responsive rather than theatrical.
 function ClaimRow({ item, staggerIndex }: ClaimRowProps) {
   const status = STATUS_DISPLAY[item.status];
   return (
     <li
-      className="rounded-md border bg-card p-4 duration-500 animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-both motion-reduce:animate-none"
-      style={{ animationDelay: `${staggerIndex * 60}ms` }}
+      className="rounded-md border bg-card p-4 duration-200 animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-both motion-reduce:animate-none"
+      style={{ animationDelay: `${staggerIndex * 40}ms` }}
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <p className="text-sm leading-6 text-foreground">{item.claim}</p>
-        <Badge
-          variant={status.variant}
-          className="shrink-0 duration-300 animate-in fade-in-0 zoom-in-95 fill-mode-both motion-reduce:animate-none"
-          style={{ animationDelay: `${staggerIndex * 60 + 120}ms` }}
-        >
+        <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
+          {item.claim}
+        </p>
+        <Badge variant={status.variant} className="shrink-0">
           <status.Icon />
           {status.label}
         </Badge>
@@ -279,22 +274,50 @@ function ClaimRow({ item, staggerIndex }: ClaimRowProps) {
       ) : null}
 
       {item.explanation ? (
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          {item.explanation}
-        </p>
+        <div className="mt-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Assessment
+          </p>
+          <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-muted-foreground">
+            {item.explanation}
+          </p>
+        </div>
       ) : null}
 
       {item.supportingEvidence.length > 0 ? (
-        <p className="mt-2 break-words font-mono text-xs text-muted-foreground">
-          {item.supportingEvidence.join(", ")}
-        </p>
+        <div className="mt-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Evidence
+          </p>
+          <ul className="mt-1.5 flex flex-wrap gap-1.5">
+            {item.supportingEvidence.map((source, index) => {
+              const isUserContext =
+                source.trim().toLowerCase() === "user context";
+              return (
+                <li key={`${source}-${index}`}>
+                  {isUserContext ? (
+                    <Badge variant="muted">User context</Badge>
+                  ) : (
+                    <code className="block max-w-full break-all rounded border bg-muted/50 px-1.5 py-0.5 font-mono text-xs text-foreground">
+                      {source}
+                    </code>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       ) : null}
 
       {item.suggestedRevision ? (
-        <p className="mt-2 rounded-md border bg-muted/50 px-3 py-2 text-sm leading-6">
-          <span className="font-semibold">Agent&apos;s suggested fix: </span>
-          {item.suggestedRevision}
-        </p>
+        <div className="mt-3 rounded-md border bg-muted/50 px-3 py-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Suggested rewrite
+          </p>
+          <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
+            {item.suggestedRevision}
+          </p>
+        </div>
       ) : null}
     </li>
   );

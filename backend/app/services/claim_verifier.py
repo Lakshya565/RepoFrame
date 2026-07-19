@@ -1,6 +1,6 @@
 import json
 from collections.abc import Callable
-from pathlib import PurePosixPath
+from dataclasses import dataclass
 
 from pydantic import ValidationError
 
@@ -8,7 +8,8 @@ from app.config import VERIFY_MAX_ITERATIONS, VERIFY_MAX_TOOL_CALLS
 from app.schemas.outputs import GeneratedOutputs
 from app.schemas.profile import UserContextInput
 from app.schemas.verify import ClaimVerification, ClaimVerificationResult
-from app.services.file_content_service import RepoEvidenceCollection
+from app.services.evidence_investigator import EvidenceWorkspace
+from app.services.github_service import GitHubFileContentError
 from app.services.llm_client import (
     EMPTY_USAGE,
     AgentCompletionFn,
@@ -22,18 +23,10 @@ from app.services.llm_client import (
 from app.services.prompt_format import format_evidence_excerpts, format_user_context
 from app.services.token_estimator import estimate_input_tokens
 
-# Phase 12 agentic claim verification. This service owns the bounded agent LOOP:
-# it gives the model two read-only tools over the already-selected repo evidence,
-# runs turns until the model returns a verdict (or a cap is hit), and parses the
-# final JSON. The single model turn and all OpenAI/error/budget plumbing live in
-# llm_client; the tools only read in-memory evidence, so the agent can never fetch
-# new files or run repo code (the safety bounds Phase 12 requires).
-
-# Snippet bounds for search_evidence so a broad query cannot return a huge, costly
-# tool result that balloons the next turn's prompt.
-_MAX_SEARCH_MATCHES_PER_FILE = 8
-_MAX_SEARCH_LINES = 40
-_SNIPPET_MAX_CHARS = 200
+# The Evidence Investigator owns the bounded model loop and dispatches read-only
+# tools against one request-scoped repository workspace. Unlike the former
+# in-memory re-query loop, it can discover and read allowlisted files that were not
+# part of the initial deterministic evidence bundle.
 
 
 # Progress stages the verification run passes through, in display order. These are
@@ -79,60 +72,91 @@ def _describe_tool_call(call: ToolCall) -> str:
     if not isinstance(arguments, dict):
         arguments = {}
 
+    if call.name == "search_repository":
+        query = str(arguments.get("query", "")).strip()
+        return f"Searching repository paths for: {query}" if query else (
+            "Searching the repository index"
+        )
     if call.name == "search_evidence":
         query = str(arguments.get("query", "")).strip()
-        return f"Searching the evidence for: {query}" if query else (
-            "Searching the repository evidence"
+        return f"Searching gathered evidence for: {query}" if query else (
+            "Searching the gathered evidence"
         )
-    if call.name == "read_evidence_file":
+    if call.name == "read_repository_file":
         path = str(arguments.get("path", "")).strip()
-        return f"Reading {path}" if path else "Reading an evidence file"
+        return f"Reading {path}" if path else "Reading a repository file"
     return "Inspecting the repository evidence"
 
 
-# The two tools the agent may call, in OpenAI function-tool schema form. Both are
-# read-only over the selected evidence: search locates terms, read returns one
-# file's excerpt. There is deliberately no tool to fetch new files or run code.
+# The investigator's three read-only tools. Path search operates on the safe known
+# tree, file reads fetch one exact allowlisted text file, and evidence search covers
+# the initial plus newly read content. There is no arbitrary URL, execution, or
+# write capability.
 _TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "search_evidence",
+            "name": "search_repository",
             "description": (
-                "Search the already-selected repository evidence files for a "
-                "term or phrase. Returns matching lines with their file path and "
-                "line number. Use this to find where a claim is (or is not) backed."
+                "Search the known repository file paths and ranking reasons for "
+                "files likely to contain missing evidence. This does not read file "
+                "contents; use read_repository_file on an exact returned path."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "The term or phrase to search for.",
+                        "description": (
+                            "A concise feature, technology, subsystem, or path term."
+                        ),
                     }
                 },
                 "required": ["query"],
+                "additionalProperties": False,
             },
         },
     },
     {
         "type": "function",
         "function": {
-            "name": "read_evidence_file",
+            "name": "read_repository_file",
             "description": (
-                "Read the selected excerpt of one evidence file by its exact path "
-                "(as listed in the available evidence files). Use this to read the "
-                "surrounding context after a search."
+                "Read one exact allowlisted text-file path from the repository. "
+                "Reads are cached and bounded. Use only after search_repository "
+                "identifies a file needed to settle a claim."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "The exact evidence file path to read.",
+                        "description": "The exact relative path returned by search_repository.",
                     }
                 },
                 "required": ["path"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_evidence",
+            "description": (
+                "Search line content across all evidence read so far, including "
+                "the initial bundle and files fetched with read_repository_file."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The exact term or phrase to search for.",
+                    }
+                },
+                "required": ["query"],
+                "additionalProperties": False,
             },
         },
     },
@@ -144,18 +168,21 @@ _TOOL_SCHEMAS = [
 # final-answer contract (a single JSON object, no tool calls) is spelled out so the
 # loop can detect completion reliably.
 _SYSTEM_PROMPT = (
-    "You are RepoFrame's claim-verification agent. You check whether the factual "
-    "claims in generated project writeups are actually backed by the repository "
-    "evidence and the user-provided context.\n\n"
-    "The selected repository evidence is provided IN FULL below, under REPOSITORY "
-    "EVIDENCE. Read it — it is the primary thing you judge against. Two optional "
-    "tools let you re-query it if a file is long: search_evidence(query) finds a "
-    "term across the evidence, and read_evidence_file(path) re-shows one file by "
-    "its exact path. You do not need the tools to see the evidence; it is already "
-    "shown to you.\n\n"
+    "You are RepoFrame's Evidence Investigator. You check whether factual claims "
+    "in generated project writeups are backed by repository evidence or the "
+    "user-provided context.\n\n"
+    "The strongest deterministic repository evidence is provided IN FULL below. "
+    "Start with it. When it does not settle a repository-verifiable claim, use "
+    "search_repository(query) to find candidate paths, read_repository_file(path) "
+    "to inspect only the most relevant exact paths, and search_evidence(query) to "
+    "search everything read so far. Repository index matches are leads, not "
+    "evidence: cite a path only after you have seen its contents.\n\n"
     "Strict rules:\n"
-    "- Base every judgment ONLY on the evidence below and the user-provided "
-    "context. Do not assume, fetch, or invent anything outside them.\n"
+    "- Base every judgment ONLY on file contents returned in the prompt/tools and "
+    "the user-provided context. Do not assume or invent missing facts.\n"
+    "- Investigate only when the initial evidence leaves a material gap. Do not "
+    "re-read files, explore unrelated paths, or search repeatedly for facts only "
+    "the user could know.\n"
     "- The user-provided context is itself valid evidence for facts the repository "
     "cannot show (ownership, intent, audience, team size, impact). A claim it backs "
     "is 'supported', cited as 'user context'. Use 'needs_user_confirmation' only "
@@ -187,10 +214,25 @@ _SYSTEM_PROMPT = (
     "suggestedRevision to null. A 'supported' status together with a non-null "
     "suggestedRevision is a contradiction: if a claim needs rewording, it is not "
     "'supported'.\n\n"
-    "When every claim is checked, respond with ONLY this JSON object and NO tool "
-    "calls: {\"verifications\": [{\"claim\": string, \"status\": string, "
+    "While evidence tools are available, focus only on gathering missing evidence. "
+    "If no tool is needed or the evidence is sufficient, return only "
+    "{\"ready\": true} with no tool calls; do not draft the verdict yet.\n\n"
+    "When the user explicitly says evidence collection is complete, respond with "
+    "ONLY this JSON object and NO tool calls: "
+    "{\"verifications\": [{\"claim\": string, \"status\": string, "
     "\"sections\": [string], \"supportingEvidence\": [string], "
     "\"explanation\": string, \"suggestedRevision\": string or null}]}"
+)
+
+# Ends the investigation phase and asks a tool-free reasoning turn to make the
+# actual claim judgments. Keeping this separate is required for Luna on Chat
+# Completions: tool-enabled turns must disable reasoning, while this final turn
+# can safely use the configured reasoning effort and JSON response mode.
+_FINAL_VERDICT_PROMPT = (
+    "Evidence collection is complete. Review every generated section, the user "
+    "context, the initial repository evidence, and every tool result in this "
+    "conversation. Produce the final verification result now. Return ONLY the "
+    "JSON object required by the system prompt, with no markdown or commentary."
 )
 
 
@@ -246,71 +288,31 @@ def _format_claims(
 def _build_initial_prompt(
     outputs: GeneratedOutputs,
     user_context: UserContextInput,
-    evidence: RepoEvidenceCollection,
+    workspace: EvidenceWorkspace,
     sections: list[str] | None = None,
 ) -> str:
+    tree_note = (
+        "GitHub reported a truncated tree; tools may use only paths in the known index."
+        if workspace.tree_is_truncated
+        else "The repository tree index is complete."
+    )
     return (
         "GENERATED OUTPUTS TO VERIFY\n"
         f"{_format_claims(outputs, sections)}\n\n"
         "USER-PROVIDED CONTEXT\n"
         f"{format_user_context(user_context)}\n\n"
-        "REPOSITORY EVIDENCE (the selected files in full; the tools can re-query these)\n"
-        f"{format_evidence_excerpts(evidence, '(no evidence files were available)')}"
+        "REPOSITORY SCOPE\n"
+        f"{workspace.owner}/{workspace.repo}@{workspace.ref}\n"
+        f"{len(workspace.repository_index)} allowlisted paths. {tree_note}\n\n"
+        "INITIAL REPOSITORY EVIDENCE (selected files in full)\n"
+        f"{format_evidence_excerpts(workspace.initial_evidence, '(no initial evidence files were available)')}"
     )
 
 
-# search_evidence tool: case-insensitive line search across the selected files,
-# bounded so a broad query cannot return an enormous result. Returns matches with
-# file path and 1-based line numbers.
-def _search_evidence(evidence: RepoEvidenceCollection, query: str) -> str:
-    needle = query.strip().lower()
-    if not needle:
-        return "Provide a non-empty query to search for."
-
-    lines_out: list[str] = []
-    for file in evidence.selected_files:
-        matches = 0
-        for number, line in enumerate(file.content.splitlines(), start=1):
-            if needle in line.lower():
-                snippet = line.strip()[:_SNIPPET_MAX_CHARS]
-                lines_out.append(f"{file.path}:L{number}: {snippet}")
-                matches += 1
-                if matches >= _MAX_SEARCH_MATCHES_PER_FILE:
-                    break
-            if len(lines_out) >= _MAX_SEARCH_LINES:
-                break
-        if len(lines_out) >= _MAX_SEARCH_LINES:
-            break
-
-    if not lines_out:
-        return f"No matches for '{query}' in the selected evidence."
-    return "\n".join(lines_out)
-
-
-# read_evidence_file tool: returns one selected file's excerpt. Matching is
-# tolerant — exact path, else case-insensitive path, else basename — so a slightly
-# off path (e.g. "readme.md" vs "README.md") does not dead-end the agent. A genuine
-# miss returns the available paths so the model can correct itself rather than fail.
-def _read_evidence_file(evidence: RepoEvidenceCollection, path: str) -> str:
-    target = path.strip().lower()
-    for file in evidence.selected_files:
-        if file.path == path or file.path.lower() == target or (
-            PurePosixPath(file.path).name.lower() == target
-        ):
-            return f"{file.path} [{file.source_type}]:\n{file.content}"
-
-    available = "\n".join(f"- {file.path}" for file in evidence.selected_files)
-    return (
-        f"No selected evidence file at '{path}'. Available paths:\n{available}"
-        if available
-        else f"No selected evidence file at '{path}'. There is no evidence available."
-    )
-
-
-# Runs one tool call against the in-memory evidence and returns its text result.
-# Bad arguments or an unknown tool become a normal tool result (so the model can
-# recover) rather than an exception that aborts the run.
-def _dispatch_tool(evidence: RepoEvidenceCollection, call: ToolCall) -> str:
+# Runs one tool call against the request-scoped workspace. Invalid arguments and
+# unknown tools become normal tool results so Luna can recover; systemic GitHub
+# failures still propagate and stop the run with the correct status.
+def _dispatch_tool(workspace: EvidenceWorkspace, call: ToolCall) -> str:
     try:
         arguments = json.loads(call.arguments) if call.arguments else {}
     except json.JSONDecodeError:
@@ -319,10 +321,12 @@ def _dispatch_tool(evidence: RepoEvidenceCollection, call: ToolCall) -> str:
     if not isinstance(arguments, dict):
         return "Tool arguments must be a JSON object."
 
+    if call.name == "search_repository":
+        return workspace.search_repository(str(arguments.get("query", "")))
+    if call.name == "read_repository_file":
+        return workspace.read_repository_file(str(arguments.get("path", "")))
     if call.name == "search_evidence":
-        return _search_evidence(evidence, str(arguments.get("query", "")))
-    if call.name == "read_evidence_file":
-        return _read_evidence_file(evidence, str(arguments.get("path", "")))
+        return workspace.search_evidence(str(arguments.get("query", "")))
     return f"Unknown tool '{call.name}'."
 
 
@@ -392,30 +396,107 @@ def _extract_json_object(text: str) -> str | None:
     return text[start : end + 1]
 
 
-# Runs the bounded verification agent over the already-selected evidence and the
-# generated outputs. Loops up to VERIFY_MAX_ITERATIONS model turns: on each turn
-# the model may call the evidence tools (capped by VERIFY_MAX_TOOL_CALLS in total),
-# and the loop feeds the results back; the final allowed turn (or the turn after
-# the tool budget is spent) forces a no-tools answer so the run always ends with a
-# verdict. Returns the verifications, the initial-prompt token estimate, and the
-# token usage summed across every turn. An optional sections list scopes a per-tab
-# verification to specific output tabs (None = every tab with content). When there
-# are no claims to check, it short-circuits without any OpenAI call so it never
-# spends tokens for nothing. An optional progress sink is called as each real stage
-# (analyzing -> per-tool-call checking -> compiling) is reached, so a streaming
-# caller can drive a live UI; passing nothing runs the loop identically but silent.
+# Audit metadata for one bounded investigation. It is returned to the API and also
+# attached to partial-failure errors so successful turns are never hidden from
+# spend accounting.
+@dataclass(frozen=True)
+class InvestigationStats:
+    model_calls: int
+    tool_calls: int
+    additional_files_inspected: list[str]
+
+
+# Typed service result keeps the growing verification metadata explicit instead
+# of relying on a positional tuple shared across route and test callers.
+@dataclass(frozen=True)
+class VerificationRunResult:
+    verifications: list[ClaimVerification]
+    estimated_input_tokens: int
+    usage: TokenUsage
+    investigation: InvestigationStats
+
+
+# A verifier-specific LLMError carrying all spend and investigation state gathered
+# before a model, parsing, or systemic GitHub failure ended the run.
+class VerificationRunError(LLMError):
+    def __init__(
+        self,
+        message: str,
+        status_code: int,
+        usage: TokenUsage,
+        investigation: InvestigationStats,
+    ) -> None:
+        super().__init__(
+            message,
+            status_code,
+            usage=usage,
+            model_calls=investigation.model_calls,
+        )
+        self.investigation = investigation
+
+
+# Builds immutable run metadata from the loop counters and workspace state.
+def _investigation_stats(
+    workspace: EvidenceWorkspace,
+    model_calls: int,
+    tool_calls: int,
+) -> InvestigationStats:
+    return InvestigationStats(
+        model_calls=model_calls,
+        tool_calls=tool_calls,
+        additional_files_inspected=workspace.additional_files_inspected,
+    )
+
+
+# Wraps a failure with the completed-turn usage from both the running total and,
+# when present, the just-failed model result (for example a truncated response).
+def _verification_error(
+    exc: LLMError | GitHubFileContentError,
+    workspace: EvidenceWorkspace,
+    total_usage: TokenUsage,
+    model_calls: int,
+    tool_calls: int,
+) -> VerificationRunError:
+    usage = total_usage
+    completed_calls = model_calls
+    if isinstance(exc, LLMError):
+        usage = usage + exc.usage
+        completed_calls += exc.model_calls
+    return VerificationRunError(
+        str(exc),
+        exc.status_code,
+        usage,
+        _investigation_stats(workspace, completed_calls, tool_calls),
+    )
+
+
+# Runs the bounded Evidence Investigator in two phases. Up to one fewer than the
+# configured maximum turns may use read-only tools; the final reserved turn has
+# no tool schemas and produces the verdict. This preserves the overall model-call
+# bound while using Luna's supported Chat Completions request shapes. Empty
+# outputs still short-circuit without a model call.
 def verify_claims(
-    evidence: RepoEvidenceCollection,
+    workspace: EvidenceWorkspace,
     outputs: GeneratedOutputs,
     user_context: UserContextInput,
     sections: list[str] | None = None,
     agent_fn: AgentCompletionFn = openai_agent_completion,
     progress: ProgressFn | None = None,
-) -> tuple[list[ClaimVerification], int, TokenUsage]:
+) -> VerificationRunResult:
     if not _format_claims(outputs, sections):
-        return [], 0, EMPTY_USAGE
+        return VerificationRunResult(
+            verifications=[],
+            estimated_input_tokens=0,
+            usage=EMPTY_USAGE,
+            investigation=_investigation_stats(workspace, 0, 0),
+        )
 
-    initial_prompt = _build_initial_prompt(outputs, user_context, evidence, sections)
+    initial_prompt = _build_initial_prompt(
+        outputs,
+        user_context,
+        workspace,
+        sections,
+    )
     estimated_tokens = estimate_input_tokens(len(_SYSTEM_PROMPT) + len(initial_prompt))
 
     messages: list[dict] = [
@@ -424,49 +505,127 @@ def verify_claims(
     ]
     total_usage = EMPTY_USAGE
     tool_calls_made = 0
+    model_calls_made = 0
 
     # The first turn is the agent reading the writeup + evidence and pulling out the
     # claims to check; signal it before the call so the UI advances as work starts.
     _emit(progress, VERIFY_STAGE_ANALYZING, None)
 
-    for iteration in range(VERIFY_MAX_ITERATIONS):
-        # Force a final, no-tools answer on the last allowed turn or once the tool
-        # budget is exhausted, so the loop cannot end without a verdict.
-        force_final = (
-            iteration == VERIFY_MAX_ITERATIONS - 1
-            or tool_calls_made >= VERIFY_MAX_TOOL_CALLS
-        )
-        # A forced-final turn IS the verdict turn, so surface "compiling" before it
-        # (that is where a reasoning model spends the verdict-generation time).
-        if force_final:
-            _emit(progress, VERIFY_STAGE_COMPILING, None)
-        tool_choice = "none" if force_final else "auto"
-
-        step = complete_with_tools(messages, _TOOL_SCHEMAS, tool_choice, agent_fn)
+    investigation_turns = max(VERIFY_MAX_ITERATIONS - 1, 0)
+    for _iteration in range(investigation_turns):
+        # Reserve the final model call for the tool-free verdict. Once the tool
+        # budget is exhausted, there is no reason to spend another investigation
+        # turn.
+        if tool_calls_made >= VERIFY_MAX_TOOL_CALLS:
+            break
+        try:
+            step = complete_with_tools(
+                messages,
+                _TOOL_SCHEMAS,
+                "auto",
+                agent_fn,
+            )
+        except LLMError as exc:
+            raise _verification_error(
+                exc,
+                workspace,
+                total_usage,
+                model_calls_made,
+                tool_calls_made,
+            ) from exc
+        model_calls_made += 1
         total_usage = total_usage + step.usage
 
-        # A turn with tool calls (and tools still allowed) means keep gathering: run
-        # each call and append its result, then loop for the model's next turn. Each
-        # call emits a "checking" line describing the real evidence lookup.
-        if step.tool_calls and not force_final:
+        # A turn with tool calls means keep gathering: run each call and append its
+        # result, then loop for the model's next turn. Each call emits a "checking"
+        # line describing the real evidence lookup.
+        if step.tool_calls:
             messages.append(_assistant_tool_call_message(step))
             for call in step.tool_calls:
+                if tool_calls_made >= VERIFY_MAX_TOOL_CALLS:
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.id,
+                            "content": (
+                                "The tool-call limit is exhausted. Use the evidence "
+                                "already gathered and produce the final verdict."
+                            ),
+                        }
+                    )
+                    continue
+
                 tool_calls_made += 1
-                _emit(progress, VERIFY_STAGE_CHECKING, _describe_tool_call(call))
+                _emit(
+                    progress,
+                    VERIFY_STAGE_CHECKING,
+                    _describe_tool_call(call),
+                )
+                try:
+                    tool_result = _dispatch_tool(workspace, call)
+                except GitHubFileContentError as exc:
+                    raise _verification_error(
+                        exc,
+                        workspace,
+                        total_usage,
+                        model_calls_made,
+                        tool_calls_made,
+                    ) from exc
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": call.id,
-                        "content": _dispatch_tool(evidence, call),
+                        "content": tool_result,
                     }
                 )
             continue
 
-        # Otherwise this is the final answer: signal compiling (no-op if a forced
-        # turn already did) and parse the verdict.
-        _emit(progress, VERIFY_STAGE_COMPILING, None)
-        return _parse_verifications(step.content), estimated_tokens, total_usage
+        # No requested tool means the investigator considers the available
+        # evidence sufficient. Its draft content is intentionally ignored; the
+        # reserved reasoning turn below owns the authoritative verdict.
+        break
 
-    # Unreachable in practice (the last turn forces a final answer), but guards
-    # against a future change to the loop bounds.
-    raise LLMError("The verification agent did not converge on a result.", 502)
+    _emit(progress, VERIFY_STAGE_COMPILING, None)
+    final_messages = [
+        *messages,
+        {"role": "user", "content": _FINAL_VERDICT_PROMPT},
+    ]
+    try:
+        final_step = complete_with_tools(
+            final_messages,
+            [],
+            "none",
+            agent_fn,
+        )
+    except LLMError as exc:
+        raise _verification_error(
+            exc,
+            workspace,
+            total_usage,
+            model_calls_made,
+            tool_calls_made,
+        ) from exc
+
+    model_calls_made += 1
+    total_usage = total_usage + final_step.usage
+    try:
+        verifications = _parse_verifications(final_step.content)
+    except LLMError as exc:
+        raise _verification_error(
+            exc,
+            workspace,
+            total_usage,
+            model_calls_made,
+            tool_calls_made,
+        ) from exc
+
+    return VerificationRunResult(
+        verifications=verifications,
+        estimated_input_tokens=estimated_tokens,
+        usage=total_usage,
+        investigation=_investigation_stats(
+            workspace,
+            model_calls_made,
+            tool_calls_made,
+        ),
+    )

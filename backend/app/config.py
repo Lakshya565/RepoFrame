@@ -52,13 +52,11 @@ OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 # OPENAI_TEMPERATURE keeps generation grounded rather than creative. Input size
 # is capped separately by MAX_TOTAL_PROMPT_CHARS via check_prompt_budget().
 #
-# Default model. gpt-5.4-mini is a current-generation reasoning model: it does
-# NOT accept `temperature` (the generator omits it automatically and uses
-# `reasoning_effort` instead), and its reasoning tokens are billed as — and share
-# the budget with — the output tokens. That makes it meaningfully pricier than
-# gpt-4o-mini; override OPENAI_MODEL to change tiers (e.g. gpt-5.4-nano for less
-# cost, or gpt-4o-mini to return to the prior default).
-OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+# GPT-5.6 Luna is RepoFrame's single model for generation and the Evidence
+# Investigator. Structured and tool-free verdict calls use the configured
+# reasoning effort; Chat Completions tool turns use "none", the supported Luna
+# request shape. Temperature is omitted for every Luna call.
+OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
 
 # Output budget. On reasoning models, reasoning tokens consume this same budget,
 # so it must comfortably fit both the reasoning and the JSON answer; medium/high
@@ -92,10 +90,19 @@ OPENAI_MAX_RETRIES: int = int(os.getenv("OPENAI_MAX_RETRIES", "2"))
 # loop, so without bounds it could spin (and spend tokens) indefinitely. These cap
 # how many model turns it gets and how many evidence tool calls it may make in
 # total across those turns. The per-call prompt budget (check_prompt_budget) still
-# applies on every turn on top of these. On the final allowed turn the loop forces
-# a no-tools answer so the run always ends with a verdict rather than mid-search.
+# applies on every turn on top of these. The loop reserves one model turn for a
+# tool-free reasoning verdict, so it always ends with JSON rather than mid-search.
 VERIFY_MAX_ITERATIONS: int = int(os.getenv("VERIFY_MAX_ITERATIONS", "8"))
 VERIFY_MAX_TOOL_CALLS: int = int(os.getenv("VERIFY_MAX_TOOL_CALLS", "12"))
+
+# Separate caps for files the Evidence Investigator reads beyond the deterministic
+# initial bundle. They bound GitHub work and the context growth added by tools.
+VERIFY_MAX_ADDITIONAL_FILES: int = int(
+    os.getenv("VERIFY_MAX_ADDITIONAL_FILES", "4")
+)
+VERIFY_MAX_ADDITIONAL_CHARS: int = int(
+    os.getenv("VERIFY_MAX_ADDITIONAL_CHARS", "24000")
+)
 
 
 # ============================================================
@@ -129,12 +136,9 @@ MAX_ANALYSES_PER_DAY_GLOBAL: int = int(os.getenv("MAX_ANALYSES_PER_DAY", "500"))
 # ============================================================
 # These ARE enforced (unlike the placeholders above), but only when Supabase is
 # configured — the no-login dev flow has no per-user ledger and stays unlimited.
-# Enforcement counts rows in the `usage_metrics` table: every paid OpenAI call
-# (profile, each output, a revise, interview prep, a verify) records one row, so
-# the cap is on *paid generation calls per day*, which bounds spend directly. A
-# full analyze→generate-all→verify cycle is roughly 6–8 calls. Both are
-# env-tunable; the launch defaults are deliberately tight and can be raised as
-# usage is observed (see services/rate_limit.py, which reads these live).
+# Enforcement sums `usage_metrics.model_calls`. Single-shot generation contributes
+# one; verification contributes every successful Luna turn in its bounded loop.
+# This keeps the cap tied to paid model requests instead of user actions.
 #
 # Per-user/day quota keys on the JWT-verified user_id (not a spoofable IP/session),
 # so it survives across a user's browser sessions. The global/day cap is the
