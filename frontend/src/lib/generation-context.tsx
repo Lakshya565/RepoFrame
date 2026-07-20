@@ -16,7 +16,6 @@ import {
   type OutputSection,
   type ProjectProfileData,
   type RepoMetadataResponse,
-  type UsageTotals,
 } from "@/lib/repo-api";
 import { type ProjectDetail } from "@/lib/projects-api";
 import { EMPTY_OUTPUTS } from "@/lib/outputs";
@@ -28,7 +27,7 @@ import { EMPTY_USER_CONTEXT, type UserContext } from "@/lib/user-context";
 // unmount whenever the user switched tabs — losing a generated writeup. This
 // provider lifts ALL generation state up into the shared analysis layout, which
 // (per the App Router) stays mounted across navigations between its child pages.
-// ProjectWriteupSection and the developer panel read from here instead of owning
+// ProjectWriteupSection reads from here instead of owning
 // the state, so generation survives — and can even finish — across tab switches.
 
 // Identifies the single generation task allowed to run at a time. The presence of
@@ -52,25 +51,6 @@ export type InterviewRevert = {
   topics: InterviewTopic[];
   reverted: boolean;
 } | null;
-
-// The empty per-session token meter, shared by the developer panel and every
-// generation call.
-const EMPTY_USAGE_TOTALS: UsageTotals = {
-  promptTokens: 0,
-  completionTokens: 0,
-  reasoningTokens: 0,
-  totalTokens: 0,
-};
-
-// Sums two usage totals field by field to accumulate the per-session meter.
-function addTotals(a: UsageTotals, b: UsageTotals): UsageTotals {
-  return {
-    promptTokens: a.promptTokens + b.promptTokens,
-    completionTokens: a.completionTokens + b.completionTokens,
-    reasoningTokens: a.reasoningTokens + b.reasoningTokens,
-    totalTokens: a.totalTokens + b.totalTokens,
-  };
-}
 
 // The full generation state plus its setters. Setters are the raw React
 // dispatchers so consumers keep using functional updates (e.g.
@@ -117,13 +97,6 @@ type GenerationContextValue = {
   setBusyTask: Dispatch<SetStateAction<GenerationTask | null>>;
   error: string | null;
   setError: Dispatch<SetStateAction<string | null>>;
-  // The per-session token meter and the lifetime-total refresh signal, read by
-  // the developer panel. addUsage accumulates one call's real usage;
-  // refreshLifetime bumps the signal so the persistent total refetches.
-  sessionUsage: UsageTotals;
-  usageRefresh: number;
-  addUsage: (usage: UsageTotals) => void;
-  refreshLifetime: () => void;
   // The repo metadata for the analysis in progress (Phase 15). Set by the Analysis
   // page once its fetch resolves, and lifted here so the auto-save (which runs in
   // the shared layout, across tabs) has the metadata a saved snapshot needs.
@@ -166,10 +139,6 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
   const [guessesSeeded, setGuessesSeeded] = useState(false);
   const [busyTask, setBusyTask] = useState<GenerationTask | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  const [sessionUsage, setSessionUsage] =
-    useState<UsageTotals>(EMPTY_USAGE_TOTALS);
-  const [usageRefresh, setUsageRefresh] = useState(0);
 
   const [repoMetadata, setRepoMetadata] =
     useState<RepoMetadataResponse | null>(null);
@@ -238,10 +207,6 @@ export function GenerationProvider({ children }: { children: ReactNode }) {
     setBusyTask,
     error,
     setError,
-    sessionUsage,
-    usageRefresh,
-    addUsage: (usage) => setSessionUsage((prev) => addTotals(prev, usage)),
-    refreshLifetime: () => setUsageRefresh((count) => count + 1),
     repoMetadata,
     setRepoMetadata,
     hydrate,

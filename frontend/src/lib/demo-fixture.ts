@@ -78,7 +78,7 @@ export const DEMO_PROJECT: ProjectDetail = {
       "Deterministic file ranking and tech-stack detection from real repository content",
       "Grounded generation of resume bullets, README intro, portfolio blurb, and LinkedIn copy",
       "Agentic claim verification that labels each statement by how well the evidence supports it",
-      "Per-analysis and lifetime token metering so generation cost is always visible",
+      "Persistent backend accounting for prompt, completion, reasoning, and total token usage",
     ],
     technicalHighlights: [
       "A prompt-budget guard caps the characters of evidence sent to the model, bounding cost per analysis",
@@ -115,7 +115,7 @@ export const DEMO_PROJECT: ProjectDetail = {
       "Built RepoFrame, a full-stack developer tool (Next.js + FastAPI) that turns any GitHub repository into evidence-backed resume bullets, README sections, and interview prep.",
       "Designed a deterministic evidence pipeline that ranks the most relevant files and detects the tech stack from real repository content rather than guesses.",
       "Implemented a budget-bounded LLM generation step with an agent that verifies each generated claim against the selected repo evidence.",
-      "Added per-analysis and lifetime token metering so generation cost is transparent at every step.",
+      "Implemented persistent backend token and model-call accounting to support spend controls and product analytics.",
     ],
     readmeIntro:
       "# RepoFrame\n\nRepoFrame turns a GitHub repository into writeups you can defend. It reads a repo's structure, files, and detected tech stack, then generates resume bullets, README sections, portfolio blurbs, and interview prep — each tied to evidence you can verify, not generic AI filler.",
@@ -138,7 +138,7 @@ export const DEMO_PROJECT: ProjectDetail = {
       question: "How is generation cost controlled?",
       talkingPoints: [
         "Character-budget enforcement on the evidence bundle before the request.",
-        "Per-analysis and lifetime token metering surfaced in the UI.",
+        "The backend records actual prompt, completion, reasoning, and total token usage for every model run.",
         "Verification and interview prep are opt-in, so nothing spends tokens by default.",
       ],
     },
@@ -157,11 +157,12 @@ export const DEMO_PROJECT: ProjectDetail = {
     },
     {
       claim:
-        "Added per-analysis and lifetime token metering so generation cost is transparent",
+        "Implemented persistent backend token and model-call accounting",
       status: "supported",
       sections: ["resumeBullets"],
       supportingEvidence: ["backend/app/services/usage_store.py"],
-      explanation: "A lifetime usage ledger and per-analysis meter back this claim.",
+      explanation:
+        "The backend usage ledger records token totals and model-call counts.",
       suggestedRevision: null,
     },
   ],

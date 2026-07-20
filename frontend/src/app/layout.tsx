@@ -3,7 +3,6 @@ import { IBM_Plex_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AuthProvider } from "@/lib/auth-context";
-import { MetricsDrawer } from "@/components/metrics/metrics-drawer";
 import { ScrollProgress } from "@/components/ui/scroll-progress";
 
 // IBM Plex Sans for body/UI text and JetBrains Mono for code, file paths, and
@@ -53,7 +52,6 @@ export default function RootLayout({
           <ScrollProgress />
           {/* Auth state (Supabase) available app-wide; inert when unconfigured. */}
           <AuthProvider>{children}</AuthProvider>
-          <MetricsDrawer />
         </ThemeProvider>
       </body>
     </html>

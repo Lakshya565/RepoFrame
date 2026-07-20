@@ -32,13 +32,11 @@ frontend/
     tech-stack-card.tsx           Detected tech stack with evidence
     important-files-card.tsx      Ranked important files
     repo-tree-view.tsx            Expandable file tree
-    github-rate-limit-card.tsx    GitHub API budget
     user-context-form.tsx         Phase 9: user context questionnaire
-    project-writeup-section.tsx   Phase 11/12: orchestrates generation, verification, usage meter
+    project-writeup-section.tsx   Phase 11/12: orchestrates generation and verification
     generated-outputs-card.tsx    Phase 11: tabbed outputs (resume/README/etc. + interview)
     evidence-panel.tsx            Phase 11: claim-to-source links for the profile
     claim-verification-panel.tsx  Phase 12: per-claim verification status display
-    token-usage-panel.tsx         Phase 12: per-session + lifetime token meter
   src/lib/
     repo-api.ts                   Typed client for every backend endpoint
     repo-tree.ts                  Builds the nested tree from GitHub's flat path list
@@ -178,7 +176,7 @@ Phases 1 through 13 are implemented. The app has a landing page with a GitHub re
 - `POST /api/generate/verify` — run the bounded agentic claim-verification workflow over generated outputs (opt-in only).
 - `GET /api/github/rate-limit` — report the current GitHub REST API budget.
 - `GET /api/usage/total` — report the persistent lifetime OpenAI token totals recorded by the backend.
-- `GET /api/metrics` — developer view of operational and claim-quality metrics (repos analyzed, files scanned/selected, outputs generated, claim verification counts by status, request/error counts, LLM/backend latency).
+- `GET /api/metrics` — report operational and claim-quality metrics (repos analyzed, files scanned/selected, outputs generated, claim verification counts by status, request/error counts, LLM/backend latency).
 
 Phase 7 file-content fetching is intentionally bounded: it selects README, dependency/config manifests, and the top-ranked source files, then enforces a maximum number of files, a per-file character limit, and a total character limit across all excerpts. Files that are missing, oversized, non-text, or beyond the limits are returned as skipped with a clear reason, so the evidence stays small and auditable.
 
@@ -206,7 +204,7 @@ Two efficiency/safety properties: (1) the **profile is generated once and reused
 
 Phase 12 adds agentic claim verification and token tracking. `POST /api/generate/verify` rebuilds the deterministic initial evidence and a safe index of the known repository tree, then runs the **Evidence Investigator**. The strongest evidence is provided inline, while three read-only tools let Luna search repository paths (`search_repository`), fetch an exact allowlisted text file (`read_repository_file`), and search all accumulated contents (`search_evidence`). Reads are cached and restricted to the authorized repo/ref; traversal, arbitrary URLs, binaries, oversized files, execution, and writes are unavailable. The agent identifies discrete factual claims across every generated tab and labels each `supported`, `partially_supported`, `needs_user_confirmation`, or `unsupported`, retaining user context as evidence for ownership, intent, and impact. Runs are bounded by `VERIFY_MAX_ITERATIONS`, `VERIFY_MAX_TOOL_CALLS`, `VERIFY_MAX_ADDITIONAL_FILES`, `VERIFY_MAX_ADDITIONAL_CHARS`, and the shared prompt budget. The loop reserves its last model call for a tool-free JSON verdict at the configured reasoning effort (`medium` by default); earlier tool-selection turns use Luna with reasoning disabled, the supported Chat Completions request shape. Verification responses include an `investigation` audit with model turns, tool calls, and additional files inspected, which the frontend displays above the findings.
 
-Token tracking captures real prompt, completion, reasoning, and total tokens from OpenAI. The local JSON ledger tracks both user-visible runs and actual model calls; when Supabase is configured, `usage_metrics.model_calls` does the same per user. Daily spend caps sum model calls, so every successful turn of a multi-turn investigation is charged instead of counting the entire verification as one request. Apply all migrations in `supabase/migrations/`, including `0002_usage_model_calls.sql`, before deploying this change.
+Token tracking captures real prompt, completion, reasoning, and total tokens from OpenAI. The local JSON ledger tracks both user-visible runs and actual model calls; when Supabase is configured, `usage_metrics.model_calls` does the same per user. Daily spend caps sum model calls, so every successful turn of a multi-turn investigation is charged instead of counting the entire verification as one request. Developer token and operational-metrics panels are intentionally absent from the frontend; accounting remains enabled in the backend for spend controls and future product statistics. Apply all migrations in `supabase/migrations/`, including `0002_usage_model_calls.sql`, before deploying this change.
 
 Phase 13 adds operational and claim-quality metrics (the token-usage slice of this phase already shipped in Phase 12). `app/services/metrics_store.py` keeps a lightweight **in-memory** set of cumulative counters (repos analyzed, files scanned, files selected, outputs generated, claims verified and the breakdown by status, request and error counts) and latency aggregates (LLM and backend, as count/average/max). A FastAPI middleware records backend latency, request counts, and server-error (5xx) counts uniformly for every API request; the generation and verification routes record LLM latency and the domain counters. `GET /api/metrics` exposes a snapshot for debugging and project reporting. The store is in-memory by design (high-frequency, resets on restart) — an intentional stopgap, swappable for a Supabase-backed implementation in Phase 15 behind the same record/snapshot interface. No dollar-cost estimate is computed.
 

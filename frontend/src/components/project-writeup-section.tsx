@@ -79,8 +79,6 @@ function messageOf(caught: unknown, fallback: string): string {
 //   3. An optional instruction is folded into the prompt up front (per-card and a
 //      shared one for "Generate everything"), so the user can one-shot a result
 //      to spec instead of generating then regenerating.
-//   4. Every call's real token usage is accumulated into a per-session meter, and
-//      the persistent lifetime total is refreshed after each call (Phase 12).
 // Nothing generates on load — every call is an explicit button press.
 export function ProjectWriteupSection({
   repoUrl,
@@ -88,7 +86,7 @@ export function ProjectWriteupSection({
   // All generation state lives in the shared GenerationProvider (in the analysis
   // layout) so it survives tab navigation — see generation-context.tsx. This
   // component owns the orchestration logic below but reads/writes that shared
-  // state. addUsage/refreshLifetime feed the developer panel's token meter.
+  // state.
   const {
     context,
     setContext,
@@ -116,8 +114,6 @@ export function ProjectWriteupSection({
     setBusyTask,
     error,
     setError,
-    addUsage,
-    refreshLifetime,
   } = useGeneration();
 
   // The signed-out demo: every generation call resolves from the frozen fixture
@@ -209,8 +205,7 @@ export function ProjectWriteupSection({
   }
 
   // Returns the profile, regenerating it when the questionnaire changed since it
-  // was built (so grounding stays current) and reusing it otherwise. A fresh
-  // generation's usage is added to the session meter.
+  // was built (so grounding stays current) and reusing it otherwise.
   async function ensureProfile(): Promise<ProjectProfileData> {
     if (profile && profileContext && userContextEquals(profileContext, context)) {
       return profile;
@@ -220,7 +215,6 @@ export function ProjectWriteupSection({
       : await generateProfile(repoUrl, context);
     setProfile(response.profile);
     setProfileContext(context);
-    addUsage(response.usage);
     return response.profile;
   }
 
@@ -252,13 +246,11 @@ export function ProjectWriteupSection({
         : await generateProfile(repoUrl, context);
       setProfile(profileResponse.profile);
       setProfileContext(context);
-      addUsage(profileResponse.usage);
 
       const outputsResponse = demo
         ? await demoGenerateOutputs()
         : await generateOutputs(profileResponse.profile, undefined, allGuidance);
       setOutputs(outputsResponse.outputs);
-      addUsage(outputsResponse.usage);
       setBaselines({
         resumeBullets: sectionToText(outputsResponse.outputs, "resumeBullets"),
         readmeIntro: sectionToText(outputsResponse.outputs, "readmeIntro"),
@@ -273,12 +265,10 @@ export function ProjectWriteupSection({
         ? await demoGenerateInterview()
         : await generateInterviewPrep(profileResponse.profile, allGuidance);
       setInterviewTopics(interviewResponse.topics);
-      addUsage(interviewResponse.usage);
     } catch (caught) {
       setError(messageOf(caught, "RepoFrame could not generate the writeup."));
     } finally {
       setBusyTask(null);
-      refreshLifetime();
     }
   }
 
@@ -300,12 +290,10 @@ export function ProjectWriteupSection({
         : await generateOutputs(activeProfile, [section], guidance);
       setOutputs((current) => mergeSection(current, section, response.outputs));
       setBaseline(response.outputs, section);
-      addUsage(response.usage);
     } catch (caught) {
       setError(messageOf(caught, "RepoFrame could not generate that section."));
     } finally {
       setBusyTask(null);
-      refreshLifetime();
     }
   }
 
@@ -335,14 +323,12 @@ export function ProjectWriteupSection({
         ...current,
         [section]: { text: beforeText, reverted: false },
       }));
-      addUsage(response.usage);
       return true;
     } catch (caught) {
       setError(messageOf(caught, "RepoFrame could not regenerate that section."));
       return false;
     } finally {
       setBusyTask(null);
-      refreshLifetime();
     }
   }
 
@@ -378,12 +364,10 @@ export function ProjectWriteupSection({
         ? await demoGenerateInterview()
         : await generateInterviewPrep(activeProfile, guidance);
       setInterviewTopics(response.topics);
-      addUsage(response.usage);
     } catch (caught) {
       setError(messageOf(caught, "RepoFrame could not generate interview prep."));
     } finally {
       setBusyTask(null);
-      refreshLifetime();
     }
   }
 
@@ -406,12 +390,10 @@ export function ProjectWriteupSection({
         : await reviseInterviewPrep(activeProfile, beforeTopics, instruction);
       setInterviewTopics(response.topics);
       setInterviewRevert({ topics: beforeTopics, reverted: false });
-      addUsage(response.usage);
     } catch (caught) {
       setError(messageOf(caught, "RepoFrame could not regenerate interview prep."));
     } finally {
       setBusyTask(null);
-      refreshLifetime();
     }
   }
 
@@ -457,7 +439,6 @@ export function ProjectWriteupSection({
         : await verifyClaimsStream(repoUrl, context, outputs, { onProgress });
       setVerifications(response.verifications);
       setVerifyInvestigation(response.investigation);
-      addUsage(response.usage);
     } catch (caught) {
       setError(messageOf(caught, "RepoFrame could not verify the claims."));
     } finally {
@@ -465,7 +446,6 @@ export function ProjectWriteupSection({
       setVerifyStage(null);
       setVerifyDetail(null);
       setVerifyVisitedStages([]);
-      refreshLifetime();
     }
   }
 

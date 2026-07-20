@@ -70,15 +70,6 @@ export type TechStackResponse = ParsedRepoResponse & {
   evidenceFilesRead: number;
 };
 
-export type GitHubRateLimitResponse = {
-  limit: number;
-  used: number;
-  remaining: number;
-  reset: number;
-  resetAt: string;
-  isAuthenticated: boolean;
-};
-
 type ApiErrorResponse = {
   detail?: unknown;
 };
@@ -238,17 +229,6 @@ export async function fetchTechStack(
   );
 }
 
-// Fetches GitHub's current core REST API budget through FastAPI so the frontend
-// can show usage without receiving the token itself.
-export async function fetchGitHubRateLimit(): Promise<GitHubRateLimitResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/github/rate-limit`);
-
-  return parseResponse(
-    response,
-    "RepoFrame could not fetch GitHub rate limit status.",
-  );
-}
-
 // ── Phase 11: generated outputs ──────────────────────────────────────────────
 // These mirror the backend generation schemas. The endpoints call OpenAI, so the
 // UI only ever invokes them in response to an explicit user action.
@@ -280,13 +260,6 @@ export type UsageTotals = {
   completionTokens: number;
   reasoningTokens: number;
   totalTokens: number;
-};
-
-// Cumulative lifetime totals from GET /api/usage/total, plus how many generation
-// runs the backend has recorded.
-export type LifetimeUsage = UsageTotals & {
-  runs: number;
-  modelCalls: number;
 };
 
 export type GenerateProfileResponse = ParsedRepoResponse & {
@@ -576,40 +549,6 @@ function parseVerifyStreamFrame(frame: string): VerifyStreamEvent | null {
   } catch {
     return null;
   }
-}
-
-// Fetches the persistent lifetime token totals so the UI can show project spend
-// without anyone opening the OpenAI dashboard.
-export async function fetchLifetimeUsage(): Promise<LifetimeUsage> {
-  const response = await fetch(`${API_BASE_URL}/api/usage/total`);
-
-  return parseResponse(response, "RepoFrame could not fetch usage totals.");
-}
-
-// ── Phase 13: operational metrics (GET /api/metrics) ─────────────────────────
-// In-memory counters + latency aggregates, reset on backend restart. Keys are
-// snake_case (the backend MetricsResponse is unaliased) and dict-shaped so new
-// counters/categories can appear without breaking this client. Read-only — the
-// developer metrics drawer only displays these; it never records anything.
-
-// Latency aggregate for one category (llm, backend), in milliseconds.
-export type LatencyMetric = {
-  count: number;
-  avg_ms: number;
-  max_ms: number;
-};
-
-export type MetricsResponse = {
-  counters: Record<string, number>;
-  latency: Record<string, LatencyMetric>;
-};
-
-// Fetches the developer metrics snapshot. Spends no tokens; the backend stays the
-// single source of truth and this only displays what it has already recorded.
-export async function fetchMetrics(): Promise<MetricsResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/metrics`);
-
-  return parseResponse(response, "RepoFrame could not fetch metrics.");
 }
 
 // Posts an arbitrary JSON body and returns typed JSON or a useful Error. The

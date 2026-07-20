@@ -12,7 +12,7 @@ import { DEMO_REPO_NAME, DEMO_REPO_OWNER } from "@/lib/demo-fixture";
 // — zero GitHub calls, zero OpenAI tokens, and no hint that it isn't live. It
 // reuses the exact same chrome and pages the real app uses; only the data source
 // and the login gates differ. The auto-save / reopen headless components are
-// intentionally omitted (nothing to persist), and the developer panel is hidden.
+// intentionally omitted because the demo has nothing to persist.
 export default function DemoLayout({ children }: { children: ReactNode }) {
   return (
     <main className="flex min-h-screen flex-col">
@@ -23,7 +23,6 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
             owner={DEMO_REPO_OWNER}
             repo={DEMO_REPO_NAME}
             basePath="/demo"
-            hideDeveloper
           >
             {children}
           </AnalysisChrome>
