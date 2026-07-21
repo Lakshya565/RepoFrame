@@ -1,6 +1,7 @@
 import json
 import unittest
 
+from app.config import MAX_TOTAL_PROMPT_CHARS
 from app.schemas.outputs import GeneratedOutputs
 from app.schemas.profile import UserContextInput
 from app.services.claim_verifier import (
@@ -16,7 +17,13 @@ from app.services.file_content_service import (
     SelectedFileEvidence,
 )
 from app.services.github_service import GitHubTextFileContent
-from app.services.llm_client import EMPTY_USAGE, AgentStep, TokenUsage, ToolCall
+from app.services.llm_client import (
+    EMPTY_USAGE,
+    AgentStep,
+    TokenUsage,
+    ToolCall,
+    agent_request_chars,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +238,42 @@ class VerifyClaimsTests(unittest.TestCase):
         self.assertIn("Built with FastAPI and Next.js", initial_user_message)
         self.assertIn("fastapi==0.1", initial_user_message)
 
+    def test_large_initial_evidence_is_fitted_before_agent_call(self) -> None:
+        content = "x" * MAX_TOTAL_PROMPT_CHARS
+        evidence_file = SelectedFileEvidence(
+            path="README.md",
+            source_type="readme",
+            reason="Primary context",
+            content=content,
+            original_size=len(content),
+            truncated=False,
+            char_count=len(content),
+        )
+        workspace = EvidenceWorkspace(
+            owner="acme",
+            repo="large",
+            ref="main",
+            initial_evidence=RepoEvidenceCollection(
+                [evidence_file],
+                [],
+                len(content),
+            ),
+            repository_index=[
+                RepositoryIndexEntry("README.md", len(content), 100, ("README",))
+            ],
+        )
+        agent = ScriptedAgent([investigation_done_step(), final_step()])
+
+        verify_claims(workspace, make_outputs(), UserContextInput(), agent_fn=agent)
+
+        first_call = agent.calls[0]
+        self.assertLessEqual(
+            agent_request_chars(first_call["messages"], first_call["tools"]),
+            MAX_TOTAL_PROMPT_CHARS,
+        )
+        self.assertLess(workspace.initial_evidence.total_characters, len(content))
+        self.assertTrue(workspace.initial_evidence.selected_files[-1].truncated)
+
     def test_all_present_sections_are_in_the_prompt(self) -> None:
         # Every generated tab must reach the prompt (labeled with its section key)
         # so the agent covers all of them, not just the resume bullets.
@@ -357,6 +400,60 @@ class VerifyClaimsTests(unittest.TestCase):
         self.assertEqual(
             run.investigation.additional_files_inspected,
             ["src/feature.py"],
+        )
+
+    def test_large_tool_result_is_trimmed_to_conversation_headroom(self) -> None:
+        workspace = make_investigating_workspace()
+        large_readme = SelectedFileEvidence(
+            path="README.md",
+            source_type="readme",
+            reason="Primary context",
+            content="r" * 50_000,
+            original_size=50_000,
+            truncated=False,
+            char_count=50_000,
+        )
+        workspace.replace_initial_evidence(
+            RepoEvidenceCollection([large_readme], [], 50_000)
+        )
+        workspace.fetcher = (
+            lambda _owner, _repo, path, _ref, _limit: GitHubTextFileContent(
+                path=path,
+                content="z" * 20_000,
+                size=20_000,
+            )
+        )
+        agent = ScriptedAgent(
+            [
+                AgentStep(
+                    content=None,
+                    tool_calls=[
+                        ToolCall(
+                            "call_1",
+                            "read_repository_file",
+                            '{"path": "src/feature.py"}',
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                    usage=TokenUsage(10, 2, 0, 12),
+                ),
+                investigation_done_step(),
+                final_step(),
+            ]
+        )
+
+        verify_claims(workspace, make_outputs(), UserContextInput(), agent_fn=agent)
+
+        second_call = agent.calls[1]
+        tool_message = next(
+            message
+            for message in second_call["messages"]
+            if message.get("role") == "tool"
+        )
+        self.assertIn("Tool result truncated", tool_message["content"])
+        self.assertLessEqual(
+            agent_request_chars(second_call["messages"], second_call["tools"]),
+            MAX_TOTAL_PROMPT_CHARS,
         )
 
     def test_caps_force_a_final_answer(self) -> None:

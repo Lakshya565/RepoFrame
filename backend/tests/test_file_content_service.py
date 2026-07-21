@@ -6,9 +6,17 @@ from app.config import (
     MAX_SELECTED_FILES,
     MAX_TOTAL_PROMPT_CHARS,
 )
-from app.services.file_content_service import collect_file_evidence, select_evidence_candidates
+from app.services.file_content_service import (
+    PROMPT_BUDGET_SKIP_REASON,
+    RepoEvidenceCollection,
+    SelectedFileEvidence,
+    collect_file_evidence,
+    select_evidence_candidates,
+    trim_evidence_to_content_budget,
+)
 from app.services.file_ranker import RankedRepoFile
 from app.services.github_service import GitHubFileContentError, GitHubTextFileContent
+from app.services.prompt_budget import fit_evidence_to_request_budget
 
 
 # Builds ranked-file fixtures matching the Phase 5 output the evidence service
@@ -171,6 +179,102 @@ class FileContentServiceTests(unittest.TestCase):
             collect_file_evidence(
                 "acme", "example", "main", ranked_files, fetcher=fetcher
             )
+
+
+class PromptEvidenceTrimmingTests(unittest.TestCase):
+    def test_preserves_priority_and_marks_partial_and_skipped_files(self) -> None:
+        files = [
+            SelectedFileEvidence(
+                path="README.md",
+                source_type="readme",
+                reason="Primary context",
+                content="a" * 10,
+                original_size=10,
+                truncated=False,
+                char_count=10,
+            ),
+            SelectedFileEvidence(
+                path="package.json",
+                source_type="config",
+                reason="Dependencies",
+                content="b" * 10,
+                original_size=10,
+                truncated=False,
+                char_count=10,
+            ),
+            SelectedFileEvidence(
+                path="src/main.ts",
+                source_type="source",
+                reason="Implementation",
+                content="c" * 10,
+                original_size=10,
+                truncated=False,
+                char_count=10,
+            ),
+        ]
+        evidence = RepoEvidenceCollection(files, [], 30)
+
+        fitted = trim_evidence_to_content_budget(evidence, 15)
+
+        self.assertEqual(
+            [item.path for item in fitted.selected_files],
+            ["README.md", "package.json"],
+        )
+        self.assertEqual(fitted.selected_files[1].content, "b" * 5)
+        self.assertTrue(fitted.selected_files[1].truncated)
+        self.assertEqual(fitted.total_characters, 15)
+        self.assertEqual(fitted.skipped_files[0].path, "src/main.ts")
+        self.assertEqual(fitted.skipped_files[0].reason, PROMPT_BUDGET_SKIP_REASON)
+
+    def test_zero_budget_reports_every_selected_file_as_skipped(self) -> None:
+        file = SelectedFileEvidence(
+            path="README.md",
+            source_type="readme",
+            reason="Primary context",
+            content="content",
+            original_size=7,
+            truncated=False,
+            char_count=7,
+        )
+
+        fitted = trim_evidence_to_content_budget(
+            RepoEvidenceCollection([file], [], 7),
+            0,
+        )
+
+        self.assertEqual(fitted.selected_files, [])
+        self.assertEqual(fitted.total_characters, 0)
+        self.assertEqual(fitted.skipped_files[0].reason, PROMPT_BUDGET_SKIP_REASON)
+
+    def test_request_fitter_checks_full_file_boundary(self) -> None:
+        file = SelectedFileEvidence(
+            path="README.md",
+            source_type="readme",
+            reason="Primary context",
+            content="abcdefghij",
+            original_size=10,
+            truncated=False,
+            char_count=10,
+        )
+        evidence = RepoEvidenceCollection([file], [], 10)
+
+        # A partial excerpt carries a truncation label while the complete file does
+        # not. This makes 9 chars fail while the 10-char file boundary still fits.
+        fitted = fit_evidence_to_request_budget(
+            evidence,
+            lambda candidate: candidate.total_characters
+            + (
+                20
+                if candidate.selected_files
+                and candidate.selected_files[-1].truncated
+                else 0
+            ),
+            max_request_characters=10,
+            safety_margin_characters=0,
+        )
+
+        self.assertEqual(fitted.total_characters, 10)
+        self.assertFalse(fitted.selected_files[0].truncated)
 
 
 if __name__ == "__main__":

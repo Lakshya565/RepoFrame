@@ -93,7 +93,7 @@ def exploding_completion(system_prompt: str, user_prompt: str) -> CompletionResu
 
 class ProfileGeneratorTests(unittest.TestCase):
     def test_valid_response_parses_into_profile(self) -> None:
-        profile, tokens, _ = generate_project_profile(
+        profile, tokens, _, fitted_evidence = generate_project_profile(
             make_metadata(),
             make_technologies(),
             make_evidence(),
@@ -106,6 +106,7 @@ class ProfileGeneratorTests(unittest.TestCase):
         self.assertEqual(profile.detected_tech_stack, ["FastAPI", "Python"])
         self.assertEqual(profile.evidence[0].source, "requirements.txt")
         self.assertGreater(tokens, 0)
+        self.assertEqual(fitted_evidence.total_characters, len("print('hello')"))
 
     def test_malformed_json_raises_502(self) -> None:
         with self.assertRaises(ProfileGenerationError) as ctx:
@@ -159,19 +160,37 @@ class ProfileGeneratorTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 502)
         self.assertIn("OPENAI_MAX_OUTPUT_TOKENS", str(ctx.exception))
 
-    def test_oversized_prompt_rejected_before_completion(self) -> None:
-        # Evidence larger than the budget must trip the 413 guard, and the
-        # completion function must never run (no tokens spent on oversized input).
+    def test_oversized_evidence_is_fitted_before_completion(self) -> None:
+        captured_request_sizes: list[int] = []
+
+        def completion(system_prompt: str, user_prompt: str) -> CompletionResult:
+            captured_request_sizes.append(len(system_prompt) + len(user_prompt))
+            return fake_completion(valid_profile_json())
+
         huge = make_evidence("x" * (MAX_TOTAL_PROMPT_CHARS + 1))
+        _profile, _tokens, _usage, fitted = generate_project_profile(
+            make_metadata(),
+            make_technologies(),
+            huge,
+            UserContextInput(),
+            completion_fn=completion,
+        )
+
+        self.assertLessEqual(captured_request_sizes[0], MAX_TOTAL_PROMPT_CHARS)
+        self.assertLess(fitted.total_characters, huge.total_characters)
+        self.assertTrue(fitted.selected_files[-1].truncated)
+
+    def test_oversized_non_evidence_context_is_rejected_before_completion(self) -> None:
         with self.assertRaises(ProfileGenerationError) as ctx:
             generate_project_profile(
                 make_metadata(),
                 make_technologies(),
-                huge,
-                UserContextInput(),
+                make_evidence(),
+                UserContextInput(purpose="x" * (MAX_TOTAL_PROMPT_CHARS + 1)),
                 completion_fn=exploding_completion,
             )
         self.assertEqual(ctx.exception.status_code, 413)
+        self.assertIn("Request context", str(ctx.exception))
 
     def test_prompt_marks_blank_user_context_as_not_provided(self) -> None:
         prompt = build_profile_prompt(

@@ -42,19 +42,6 @@ class RepoMetadataResponse(BaseModel):
     license: str | None = None
 
 
-# The time window for the commit-activity timeline: the last month (daily points),
-# the last year (weekly), or the full history (adaptive grain).
-CommitActivityRange = Literal["month", "year", "all"]
-
-
-# Request body for commit activity: the repo URL plus which time range to chart.
-class CommitActivityRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    repo_url: StrictStr = Field(alias="repoUrl", min_length=1, max_length=2048)
-    range: CommitActivityRange = "year"
-
-
 # One bar in the commit-activity timeline: the UTC ISO date the bucket starts on
 # and the commits summed into it.
 class CommitTimelineBucket(BaseModel):
@@ -64,26 +51,34 @@ class CommitTimelineBucket(BaseModel):
     commit_count: int = Field(alias="commitCount")
 
 
-# The commit-activity timeline for the Analysis-page graph: the bars plus the chosen
-# grain's label, the total commits across the window, the window's start/end dates
-# (null when the repository has no commit activity), the range that was charted, and
-# whether the "all time" data may be truncated (GitHub caps contributor stats at the
-# top 100 contributors, so a very large repo can undercount).
+# One derived commit-activity window. GitHub's single last-year statistics response
+# supplies both the daily 1M view and the grouped 1Y view.
+class CommitActivityTimeline(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    interval_label: str = Field(alias="intervalLabel")
+    total_commits: int = Field(alias="totalCommits")
+    range_start: str | None = Field(default=None, alias="rangeStart")
+    range_end: str | None = Field(default=None, alias="rangeEnd")
+    buckets: list[CommitTimelineBucket]
+
+
+# The two supported windows are returned together so the frontend can switch
+# ranges without issuing another GitHub or backend request.
+class CommitActivityRanges(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    month: CommitActivityTimeline
+    year: CommitActivityTimeline
+
+
 class CommitActivityResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     owner: str
     repo: str
     normalized_url: str = Field(alias="normalizedUrl")
-    range: CommitActivityRange
-    interval_label: str = Field(alias="intervalLabel")
-    total_commits: int = Field(alias="totalCommits")
-    range_start: str | None = Field(default=None, alias="rangeStart")
-    range_end: str | None = Field(default=None, alias="rangeEnd")
-    contributors_truncated: bool = Field(
-        default=False, alias="contributorsTruncated"
-    )
-    buckets: list[CommitTimelineBucket]
+    ranges: CommitActivityRanges
 
 
 # One normalized file-tree entry returned from GitHub's tree API. RepoFrame uses

@@ -9,6 +9,7 @@ import {
   fetchCommitActivityPolling,
   type CommitActivityRange,
   type CommitActivityResponse,
+  type CommitActivityTimeline,
 } from "@/lib/repo-api";
 import { demoFetchCommitActivity } from "@/lib/demo-analysis";
 import { useDemo } from "@/lib/demo-mode";
@@ -29,7 +30,6 @@ const COMMIT_ACTIVITY_ERROR = "RepoFrame could not fetch commit activity.";
 const RANGES: { id: CommitActivityRange; label: string; noun: string }[] = [
   { id: "month", label: "1M", noun: "the last month" },
   { id: "year", label: "1Y", noun: "the last year" },
-  { id: "all", label: "All", noun: "all time" },
 ];
 
 // How long the line takes to draw itself in when the chart scrolls into view. Kept
@@ -54,7 +54,7 @@ const chartConfig = {
 const numberFormatter = new Intl.NumberFormat("en-US");
 
 // The Analysis-page "Commit activity" card: an area/line chart of commits over a
-// selectable range (last month / last year / all time), bucketed by the backend into
+// selectable range (last month / last year), bucketed by the backend into
 // an adaptive interval. Built on shadcn's Chart (which wraps Recharts) so the line
 // draws itself in correctly — left to right — when it scrolls into view, with hover
 // showing the exact count and date for the nearest point. It reserves a fixed height
@@ -63,18 +63,14 @@ export function RepoCommitTimeline({ repoUrl }: RepoCommitTimelineProps) {
   const [range, setRange] = useState<CommitActivityRange>("month");
   const demo = useDemo();
 
-  // A range-scoped fetcher: changing the range gives useRepoResource a new fetcher,
-  // which re-runs the request for that window. Uses the polling variant so the "all"
-  // range (heavier contributor stats) rides out GitHub's "still computing" 503
-  // instead of erroring — the card stays in its loading state until it resolves. The
-  // signed-out demo serves a frozen snapshot instead: GitHub's stats endpoints are
-  // slow (especially "all"), so the demo doesn't pay that latency on every visit.
+  // Fetches the bundled 1M/1Y response once. The range toggle only selects local
+  // data, while polling absorbs GitHub's temporary "still computing" response.
   const fetcher = useCallback(
     (url: string) =>
       demo
-        ? demoFetchCommitActivity(url, range)
-        : fetchCommitActivityPolling(url, range),
-    [range, demo],
+        ? demoFetchCommitActivity(url)
+        : fetchCommitActivityPolling(url),
+    [demo],
   );
   const activity = useRepoResource(repoUrl, fetcher, COMMIT_ACTIVITY_ERROR);
 
@@ -145,7 +141,7 @@ function TimelineBody({
     );
   }
 
-  const activity = resource.data;
+  const activity = resource.data?.ranges[range];
   if (!activity || activity.buckets.length === 0 || activity.totalCommits === 0) {
     const noun = RANGES.find((option) => option.id === range)?.noun ?? "this range";
     return (
@@ -158,7 +154,7 @@ function TimelineBody({
   }
 
   // Keyed by range so switching windows remounts the chart and replays the draw-in.
-  return <TimelineChart activity={activity} key={activity.range} />;
+  return <TimelineChart activity={activity} key={range} range={range} />;
 }
 
 // The loading placeholder: a caption line, a chart-sized block, and an axis line, at
@@ -248,9 +244,14 @@ function CommitDot({
 // its own dot; hovering a dot opens a tooltip anchored to it with the exact count and
 // date. The curve is `monotone`, so it never overshoots below the data — the line
 // stays flat at zero across empty stretches instead of dipping off the chart.
-function TimelineChart({ activity }: { activity: CommitActivityResponse }) {
-  const { buckets, totalCommits, intervalLabel, range, contributorsTruncated } =
-    activity;
+function TimelineChart({
+  activity,
+  range,
+}: {
+  activity: CommitActivityTimeline;
+  range: CommitActivityRange;
+}) {
+  const { buckets, totalCommits, intervalLabel } = activity;
 
   const rangeNoun =
     RANGES.find((option) => option.id === range)?.noun ?? "the last year";
@@ -363,12 +364,6 @@ function TimelineChart({ activity }: { activity: CommitActivityResponse }) {
         )}
       </div>
 
-      {range === "all" && contributorsTruncated ? (
-        <p className="mt-3 text-xs text-muted-foreground">
-          Based on GitHub&apos;s top 100 contributors, so totals may undercount on
-          very large repositories.
-        </p>
-      ) : null}
     </div>
   );
 }

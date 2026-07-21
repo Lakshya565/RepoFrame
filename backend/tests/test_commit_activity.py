@@ -70,38 +70,6 @@ class BuildCommitTimelineTests(unittest.TestCase):
         self.assertEqual([b.commit_count for b in timeline.buckets], [2, 1])
         self.assertEqual(timeline.total_commits, 3)
 
-    def test_min_weeks_pads_short_history_to_a_full_year(self) -> None:
-        # A repo with only 4 weeks of history, asked to span a year, is padded up
-        # front with zero weeks so it still lands on the 2-week rung (26 bars) with
-        # the real commits sitting at the end.
-        weeks = make_weeks([3, 5, 2, 4])
-        timeline = build_commit_timeline(weeks, min_weeks=52)
-
-        self.assertEqual(timeline.interval_label, "2 weeks")
-        self.assertEqual(len(timeline.buckets), 26)
-        # Padding adds no commits; the real weeks land in the last two 2-week bars
-        # ([3, 5] -> 8, then [2, 4] -> 6) and every earlier bar is zero.
-        self.assertEqual(timeline.total_commits, 14)
-        self.assertEqual([b.commit_count for b in timeline.buckets[-2:]], [8, 6])
-        self.assertTrue(all(b.commit_count == 0 for b in timeline.buckets[:-2]))
-
-    def test_min_weeks_leaves_longer_history_untouched(self) -> None:
-        # History already at/above the floor is not padded.
-        weeks = make_weeks([1] * 52)
-        timeline = build_commit_timeline(weeks, min_weeks=52)
-
-        self.assertEqual(len(timeline.buckets), 26)
-        self.assertEqual(timeline.total_commits, 52)
-
-    def test_min_weeks_does_not_resurrect_empty_history(self) -> None:
-        # With no data there is no anchor date to pad from, so it stays empty.
-        timeline = build_commit_timeline([], min_weeks=52)
-
-        self.assertEqual(timeline.buckets, [])
-        self.assertEqual(timeline.total_commits, 0)
-        self.assertIsNone(timeline.range_start)
-
-
 class BuildDailyTimelineTests(unittest.TestCase):
     def test_daily_timeline_expands_days_and_takes_last_n(self) -> None:
         # Three weeks of daily breakdowns (21 days); the month view keeps the last

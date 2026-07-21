@@ -13,6 +13,8 @@ import requests
 from dotenv import load_dotenv
 from requests import RequestException
 
+from app.config import GITHUB_COMMIT_STATS_TIMEOUT_SECONDS
+
 GITHUB_API_BASE_URL = "https://api.github.com"
 GITHUB_TOKEN_ENV = "GITHUB_TOKEN"
 REQUEST_TIMEOUT_SECONDS = 10
@@ -21,16 +23,8 @@ REQUEST_TIMEOUT_SECONDS = 10
 # 202 (with no body) the first time it must compute the stats for a repository.
 # A few short retries usually catch the freshly-cached data on the same request;
 # if not, the caller surfaces a "try again" state rather than blocking indefinitely.
-COMMIT_STATS_MAX_ATTEMPTS = 3
-COMMIT_STATS_RETRY_DELAY_SECONDS = 1.2
-
-# The contributor-stats endpoint (behind the "all time" range) aggregates every
-# contributor's full history, so GitHub is more likely to answer 202 "still
-# computing" for longer than the plain commit-activity endpoint. Give it a little
-# more runway before surfacing the retryable 503. The frontend also polls, so this
-# just reduces how often the first "all" request has to bounce back for a retry.
-CONTRIB_STATS_MAX_ATTEMPTS = 5
-CONTRIB_STATS_RETRY_DELAY_SECONDS = 1.5
+COMMIT_STATS_MAX_ATTEMPTS = 4
+COMMIT_STATS_RETRY_DELAY_SECONDS = 1.5
 
 BACKEND_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
@@ -270,7 +264,7 @@ def fetch_repo_languages(
 # body while GitHub builds the cache (retried a bounded number of times, then a
 # retryable "still computing" error), and an empty repository returns 204 (surfaced
 # as None). Returns the 200 response for the caller to parse. The sleep function is
-# injectable so tests never actually wait. Shared by both commit-activity fetchers.
+# injectable so tests never actually wait.
 def _request_repo_stats(
     client: requests.Session,
     url: str,
@@ -283,7 +277,7 @@ def _request_repo_stats(
             response = client.get(
                 url,
                 headers=_build_headers(),
-                timeout=REQUEST_TIMEOUT_SECONDS,
+                timeout=GITHUB_COMMIT_STATS_TIMEOUT_SECONDS,
             )
         except RequestException as exc:
             raise GitHubCommitActivityError(
@@ -362,29 +356,6 @@ def fetch_commit_activity(
     if response is None:
         return []
     return _parse_commit_activity_response(response)
-
-
-# Fetches the repository's FULL commit history as weekly totals from GitHub's
-# /stats/contributors endpoint, summing every contributor's weekly commit counts
-# into one series (used for the "all time" range, where the adaptive interval ladder
-# picks a coarser grain). Returns the weekly totals plus a flag that is True when the
-# result may be truncated — GitHub caps this endpoint at the top 100 contributors, so
-# a repo with more can undercount (the timeline SHAPE stays representative). An empty
-# repository yields an empty list.
-def fetch_contributor_weeks(
-    owner: str,
-    repo: str,
-    session: requests.Session | None = None,
-    max_attempts: int = CONTRIB_STATS_MAX_ATTEMPTS,
-    retry_delay: float = CONTRIB_STATS_RETRY_DELAY_SECONDS,
-    sleep=time.sleep,
-) -> tuple[list[WeeklyCommitCount], bool]:
-    client = session or requests.Session()
-    url = f"{GITHUB_API_BASE_URL}/repos/{owner}/{repo}/stats/contributors"
-    response = _request_repo_stats(client, url, max_attempts, retry_delay, sleep)
-    if response is None:
-        return [], False
-    return _parse_contributor_weeks_response(response)
 
 
 # Fetches GitHub's recursive tree for the default branch without file contents.
@@ -658,58 +629,6 @@ def _parse_daily_counts(days: object) -> tuple[int, ...]:
     ):
         return tuple(days)
     return ()
-
-
-# Sums GitHub's /stats/contributors JSON (a list of contributors, each with a weekly
-# array of commit counts) into one full-history weekly series, oldest-first. Returns
-# the weekly totals plus a truncation flag: GitHub returns at most the top 100
-# contributors, so a list at that cap may be incomplete. Malformed entries are
-# skipped; a non-list payload is a systemic format error.
-def _parse_contributor_weeks_response(
-    response: requests.Response,
-) -> tuple[list[WeeklyCommitCount], bool]:
-    try:
-        raw_payload = response.json()
-    except ValueError as exc:
-        raise GitHubCommitActivityError(
-            "GitHub returned an unreadable contributor-stats response.",
-            502,
-        ) from exc
-
-    if not isinstance(raw_payload, list):
-        raise GitHubCommitActivityError(
-            "GitHub returned contributor stats in an unexpected format.",
-            502,
-        )
-
-    totals_by_week: dict[int, int] = {}
-    for contributor in raw_payload:
-        if not isinstance(contributor, dict):
-            continue
-        contributor_weeks = contributor.get("weeks")
-        if not isinstance(contributor_weeks, list):
-            continue
-        for week in contributor_weeks:
-            if not isinstance(week, dict):
-                continue
-            week_start = week.get("w")
-            commits = week.get("c")
-            if (
-                isinstance(week_start, int)
-                and not isinstance(week_start, bool)
-                and isinstance(commits, int)
-                and not isinstance(commits, bool)
-            ):
-                totals_by_week[week_start] = totals_by_week.get(week_start, 0) + commits
-
-    weeks = [
-        WeeklyCommitCount(week_start=week_start, total=total)
-        for week_start, total in sorted(totals_by_week.items())
-    ]
-    # GitHub caps this endpoint at the top 100 contributors; a full list may be
-    # missing the long tail.
-    truncated = len(raw_payload) >= 100
-    return weeks, truncated
 
 
 # Reads the repository's subject topics from the metadata payload. Best-effort:

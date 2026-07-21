@@ -329,7 +329,7 @@ def openai_agent_completion(
 
 # Counts the serialized messages, tool schemas, and tool-call arguments because
 # all of them consume context across agent turns.
-def _agent_request_chars(messages: list[dict], tools: list[dict]) -> int:
+def agent_request_chars(messages: list[dict], tools: list[dict]) -> int:
     return len(json.dumps({"messages": messages, "tools": tools}, ensure_ascii=False))
 
 
@@ -343,7 +343,7 @@ def complete_with_tools(
     tool_choice: str = "auto",
     agent_fn: AgentCompletionFn = openai_agent_completion,
 ) -> AgentStep:
-    total_chars = _agent_request_chars(messages, tools)
+    total_chars = agent_request_chars(messages, tools)
     within_budget, reason = check_prompt_budget(total_chars)
     if not within_budget:
         raise LLMError(reason, 413)

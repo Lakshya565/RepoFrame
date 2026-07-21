@@ -64,6 +64,7 @@ backend/
       evidence_investigator.py ← request-scoped repository index + safe on-demand reads
       usage_store.py        ← Phase 12: persistent lifetime token ledger (JSON stopgap)
       prompt_format.py      ← shared prompt formatting (user context, evidence excerpts)
+      prompt_budget.py      ← request-aware evidence fitting before OpenAI calls
       metrics_store.py      ← Phase 13: in-memory operational + claim-quality metrics
   data/                ← Phase 12: usage.json ledger (git-ignored, local state)
   requirements.txt
@@ -165,6 +166,7 @@ Phases 1 through 13 are implemented. The app has a landing page with a GitHub re
 - `GET /health` — service health check.
 - `POST /api/repo/parse` — normalize a GitHub URL into owner/repo.
 - `POST /api/repo/metadata` — fetch public repository metadata.
+- `POST /api/repo/commit-activity` — fetch GitHub's last-year statistics once and return bundled 1M/1Y timelines.
 - `POST /api/repo/tree` — fetch the default-branch file tree.
 - `POST /api/repo/ranked-files` — deterministic filtering and ranking of important files.
 - `POST /api/repo/tech-stack` — detect technologies with evidence and confidence.
@@ -180,17 +182,19 @@ Phases 1 through 13 are implemented. The app has a landing page with a GitHub re
 
 Phase 7 file-content fetching is intentionally bounded: it selects README, dependency/config manifests, and the top-ranked source files, then enforces a maximum number of files, a per-file character limit, and a total character limit across all excerpts. Files that are missing, oversized, non-text, or beyond the limits are returned as skipped with a clear reason, so the evidence stays small and auditable.
 
+Before generation or Agentic Audit calls, RepoFrame measures the complete rendered request—including instructions, user context, generated outputs, formatting, serialization, and tool schemas—and automatically refits only the GitHub evidence to the remaining prompt capacity. Higher-ranked files stay first, the final fitting excerpt is marked truncated, and lower-priority files receive an explicit prompt-budget skip reason. Investigator tool results are likewise shortened to the conversation's remaining headroom, while the final hard budget check still rejects oversized user/generated context before any paid request.
+
 Phase 8 added token, cost, and abuse protection in preparation for OpenAI integration:
 
 - All safety limits (`MAX_SELECTED_FILES`, `MAX_CHARS_PER_FILE`, `MAX_TOTAL_PROMPT_CHARS`, `MAX_FILE_SIZE_BYTES`) are now centralized in `app/config.py` and readable from environment variables.
 - `OPENAI_API_KEY` is read from the backend environment only and is never exposed to the frontend.
-- `app/services/token_estimator.py` provides `estimate_input_tokens()` and `check_prompt_budget()` for validating evidence size before any OpenAI call.
+- `app/services/token_estimator.py` provides `estimate_input_tokens()` and `check_prompt_budget()` for validating complete request context before any OpenAI call.
 - Per-session, per-IP, and global daily analysis caps are defined in config with placeholder comments marking where Phase 16 rate-limiting middleware should be wired in.
 - An optional `ACCESS_PASSWORD` gate is available in config for early controlled deployments.
 
 Phase 9 added a user context questionnaire on the analysis page. It collects the project facts the repository cannot reveal — purpose, solo/team status, the user's own contribution, target user or client, hardest technical part, and optional measurable impact. Answers are held in frontend state only (no backend or database persistence yet): the form saves to a read-only summary and can be re-opened for editing. This context grounds the generation phase so RepoFrame does not guess intent, ownership, or impact.
 
-Phase 10 added OpenAI-based project profile generation (backend only). `POST /api/generate/profile` accepts a repo URL and the user-context answers, re-runs the deterministic pipeline (metadata, tree, ranking, tech-stack, bounded file evidence), and asks OpenAI for a validated JSON profile: project name, two-sentence summary, problem, solution, detected tech stack, core features, technical highlights, user contribution, technical challenges, resume angles, and an evidence array linking claims to sources. Cost is bounded on both sides: input is capped by `MAX_TOTAL_PROMPT_CHARS` (enforced by `check_prompt_budget()` before any call) and output by `OPENAI_MAX_OUTPUT_TOKENS`. Every OpenAI-backed feature is pinned in code to `gpt-5.6-luna`; there is deliberately no deployment environment override that can restore an older model. Structured generation and the verifier's tool-free final judgment use `OPENAI_REASONING_EFFORT=medium`, while Luna function-tool turns use `reasoning_effort=none` because Chat Completions rejects that request shape when reasoning is enabled. Temperature is never sent. Because reasoning tokens share the output budget, `OPENAI_MAX_OUTPUT_TOKENS` defaults to 6000 to avoid truncating JSON answers.
+Phase 10 added OpenAI-based project profile generation (backend only). `POST /api/generate/profile` accepts a repo URL and the user-context answers, re-runs the deterministic pipeline (metadata, tree, ranking, tech-stack, bounded file evidence), and asks OpenAI for a validated JSON profile: project name, two-sentence summary, problem, solution, detected tech stack, core features, technical highlights, user contribution, technical challenges, resume angles, and an evidence array linking claims to sources. Cost is bounded on both sides: ranked GitHub excerpts are automatically fitted inside `MAX_TOTAL_PROMPT_CHARS`, the complete request is checked again before any call, and output is bounded by `OPENAI_MAX_OUTPUT_TOKENS`. Every OpenAI-backed feature is pinned in code to `gpt-5.6-luna`; there is deliberately no deployment environment override that can restore an older model. Structured generation and the verifier's tool-free final judgment use `OPENAI_REASONING_EFFORT=medium`, while Luna function-tool turns use `reasoning_effort=none` because Chat Completions rejects that request shape when reasoning is enabled. Temperature is never sent. Because reasoning tokens share the output budget, `OPENAI_MAX_OUTPUT_TOKENS` defaults to 6000 to avoid truncating JSON answers.
 
 The OpenAI client is reused across requests (connection pooling) and built with an explicit `OPENAI_TIMEOUT_SECONDS` (default 60, versus the SDK's 10-minute default) and `OPENAI_MAX_RETRIES` (default 2, using the SDK's exponential backoff). Transport and API errors map to specific HTTP statuses (timeout → 504, rate limit → 429, auth → 500, connection → 503), a response truncated at the token limit returns a clear actionable error, and raw error detail is logged server-side rather than returned to the client. The OpenAI call lives behind an injectable completion function so the unit tests run fully offline with zero token usage. Install dependencies with `pip install -r requirements.txt` to pull in the `openai` package before using this endpoint.
 

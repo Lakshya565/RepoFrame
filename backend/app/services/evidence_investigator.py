@@ -114,6 +114,15 @@ class EvidenceWorkspace:
             item.path.casefold(): item for item in self.initial_evidence.selected_files
         }
 
+    # Replaces the deterministic bundle after request-aware prompt fitting. This
+    # keeps cached reads/searches aligned with exactly what the model received.
+    def replace_initial_evidence(self, evidence: RepoEvidenceCollection) -> None:
+        self.initial_evidence = evidence
+        self._evidence_by_path = {
+            item.path.casefold(): item
+            for item in [*evidence.selected_files, *self._additional_evidence]
+        }
+
     # Lists files inspected beyond the deterministic initial evidence. The copy
     # prevents callers from mutating the workspace's accounting state.
     @property

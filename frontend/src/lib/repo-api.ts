@@ -123,9 +123,8 @@ export async function fetchRepoMetadata(
   );
 }
 
-// The time window a commit-activity timeline covers: last month (daily points),
-// last year (weekly), or full history (adaptive grain).
-export type CommitActivityRange = "month" | "year" | "all";
+// The two supported windows derived from one last-year statistics response.
+export type CommitActivityRange = "month" | "year";
 
 // One bar of the commit-activity timeline: the UTC ISO date the bucket starts on
 // and the commits summed into it.
@@ -134,38 +133,33 @@ export type CommitTimelineBucket = {
   commitCount: number;
 };
 
-// The commit-activity timeline: adaptive-interval bars plus the grain's label, the
-// total commits over the window, the window's start/end dates (null when the
-// repository has no commit activity), the charted range, and whether the "all time"
-// data may be truncated (GitHub caps contributor stats at the top 100 contributors).
-export type CommitActivityResponse = ParsedRepoResponse & {
-  range: CommitActivityRange;
+// One timeline in the bundled response, including its grain and date bounds.
+export type CommitActivityTimeline = {
   intervalLabel: string;
   totalCommits: number;
   rangeStart: string | null;
   rangeEnd: string | null;
-  contributorsTruncated: boolean;
   buckets: CommitTimelineBucket[];
 };
 
-// Fetches commit activity as a bucketed timeline for the Analysis graph, over the
-// given range. The backend does the GitHub call(s) and all the bucketing; a "still
-// computing" stats-cache state surfaces as a retryable error the card handles.
+export type CommitActivityResponse = ParsedRepoResponse & {
+  ranges: Record<CommitActivityRange, CommitActivityTimeline>;
+};
+
+// Fetches both bucketed timelines together so range changes stay local.
 export async function fetchCommitActivity(
   repoUrl: string,
-  range: CommitActivityRange,
 ): Promise<CommitActivityResponse> {
-  return postJson(
+  return postRepoRequest(
     "/api/repo/commit-activity",
-    { repoUrl, range },
+    repoUrl,
     "RepoFrame could not fetch commit activity.",
   );
 }
 
 // GitHub computes its /stats/* endpoints lazily and returns "still computing" (which
-// the backend surfaces as a retryable 503) on the first hit for a repo — most often
-// for the heavier contributor stats behind the "all" range. So poll: retry the fetch
-// a few times with a short delay before giving up. Because this runs inside the
+// the backend surfaces as a retryable 503) on the first hit for a repo. Retry the
+// fetch a few times with a short delay before giving up. Because this runs inside the
 // resource fetcher, the card keeps showing its loading state while GitHub finishes,
 // instead of erroring on a condition that resolves within seconds. Non-503 errors
 // (and the final 503) propagate normally to the error state + manual retry.
@@ -174,11 +168,10 @@ const COMMIT_ACTIVITY_RETRY_DELAY_MS = 2500;
 
 export async function fetchCommitActivityPolling(
   repoUrl: string,
-  range: CommitActivityRange,
 ): Promise<CommitActivityResponse> {
   for (let attempt = 0; attempt < COMMIT_ACTIVITY_RETRY_ATTEMPTS; attempt += 1) {
     try {
-      return await fetchCommitActivity(repoUrl, range);
+      return await fetchCommitActivity(repoUrl);
     } catch (caught) {
       const stillComputing = caught instanceof ApiError && caught.status === 503;
       const attemptsLeft = attempt < COMMIT_ACTIVITY_RETRY_ATTEMPTS - 1;
@@ -191,7 +184,7 @@ export async function fetchCommitActivityPolling(
     }
   }
   // Unreachable — the loop always returns or throws — but keeps the return type sound.
-  return fetchCommitActivity(repoUrl, range);
+  return fetchCommitActivity(repoUrl);
 }
 
 // Fetches the recursive repository tree for the structure panel. The backend

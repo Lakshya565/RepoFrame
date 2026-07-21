@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.schemas.repo import (
-    CommitActivityRequest,
+    CommitActivityRanges,
     CommitActivityResponse,
+    CommitActivityTimeline,
     CommitTimelineBucket,
     DetectedTechnology,
     RankedRepoFile,
@@ -19,7 +20,7 @@ from app.schemas.repo import (
     TechStackResponse,
 )
 from app.services.commit_activity import (
-    MIN_ALL_RANGE_WEEKS,
+    CommitTimeline,
     build_commit_timeline,
     build_daily_timeline,
 )
@@ -31,7 +32,6 @@ from app.services.github_service import (
     GitHubMetadataError,
     GitHubTreeError,
     fetch_commit_activity,
-    fetch_contributor_weeks,
     fetch_repo_languages,
     fetch_repo_metadata,
     fetch_repo_tree,
@@ -105,34 +105,19 @@ def get_repo_metadata(
     )
 
 
-# Returns commit activity as an adaptive-interval timeline for the Analysis-page
-# graph, over one of three ranges. "month" and "year" come from one
-# /stats/commit_activity call (daily vs weekly grain); "all" sums /stats/contributors
-# for full history (and may be truncated to the top 100 contributors). The bucketing
-# is a deterministic service so the route stays thin; the stats endpoints' "still
-# computing" (202) state surfaces as a 503 the frontend can retry.
+# Fetches GitHub's last-year statistics once and derives both supported timelines.
+# Returning the pair together makes the frontend's 1M/1Y toggle local and instant.
 @router.post("/commit-activity", response_model=CommitActivityResponse)
 def get_repo_commit_activity(
-    request: CommitActivityRequest,
+    request: RepoParseRequest,
     user: AuthenticatedUser | None = Depends(require_user_or_public_demo),
 ) -> CommitActivityResponse:
-    contributors_truncated = False
     try:
         parsed_repo = parse_github_repo_url(request.repo_url)
         repo_access.apply_repo_access(user, parsed_repo.owner, parsed_repo.repo)
-        if request.range == "all":
-            weeks, contributors_truncated = fetch_contributor_weeks(
-                parsed_repo.owner, parsed_repo.repo
-            )
-            # Floor the window at a full year so young repos don't render a stub.
-            timeline = build_commit_timeline(weeks, min_weeks=MIN_ALL_RANGE_WEEKS)
-        else:
-            weeks = fetch_commit_activity(parsed_repo.owner, parsed_repo.repo)
-            timeline = (
-                build_daily_timeline(weeks)
-                if request.range == "month"
-                else build_commit_timeline(weeks)
-            )
+        weeks = fetch_commit_activity(parsed_repo.owner, parsed_repo.repo)
+        month = build_daily_timeline(weeks)
+        year = build_commit_timeline(weeks)
     except RepoUrlParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except GitHubCommitActivityError as exc:
@@ -142,12 +127,20 @@ def get_repo_commit_activity(
         owner=parsed_repo.owner,
         repo=parsed_repo.repo,
         normalized_url=parsed_repo.normalized_url,
-        range=request.range,
+        ranges=CommitActivityRanges(
+            month=_commit_timeline_response(month),
+            year=_commit_timeline_response(year),
+        ),
+    )
+
+
+# Maps the deterministic service result into the public API model for either range.
+def _commit_timeline_response(timeline: CommitTimeline) -> CommitActivityTimeline:
+    return CommitActivityTimeline(
         interval_label=timeline.interval_label,
         total_commits=timeline.total_commits,
         range_start=timeline.range_start,
         range_end=timeline.range_end,
-        contributors_truncated=contributors_truncated,
         buckets=[
             CommitTimelineBucket(
                 period_start=bucket.period_start,

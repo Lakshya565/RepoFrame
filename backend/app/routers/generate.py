@@ -132,7 +132,12 @@ def generate_profile(
         # inside the generator; it returns the validated profile, the pre-call
         # token estimate, and the real post-call token usage.
         with metrics_store.timed("llm"):
-            profile, estimated_input_tokens, usage = generate_project_profile(
+            (
+                profile,
+                estimated_input_tokens,
+                usage,
+                prompt_evidence,
+            ) = generate_project_profile(
                 metadata,
                 technologies,
                 evidence,
@@ -160,7 +165,7 @@ def generate_profile(
     metrics_store.increment(
         repos_analyzed=1,
         files_scanned=tree.total_files,
-        files_selected=len(evidence.selected_files),
+        files_selected=len(prompt_evidence.selected_files),
     )
 
     return GenerateProfileResponse(
@@ -188,7 +193,7 @@ def generate_profile(
         ),
         model=OPENAI_MODEL,
         estimated_input_tokens=estimated_input_tokens,
-        evidence_file_count=len(evidence.selected_files),
+        evidence_file_count=len(prompt_evidence.selected_files),
         usage=UsageTotals.from_usage(usage),
     )
 

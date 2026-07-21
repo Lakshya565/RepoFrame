@@ -138,6 +138,11 @@ class RepoEvidenceCollection:
     total_characters: int
 
 
+PROMPT_BUDGET_SKIP_REASON = (
+    "Prompt budget reserved for instructions and request context."
+)
+
+
 # Classifies one ranked file into an evidence category, or None when the file is
 # not a README, config manifest, or recognized source file.
 def _classify_file(path: str) -> str | None:
@@ -272,6 +277,61 @@ def collect_file_evidence(
         selected_files=selected_files,
         skipped_files=skipped_files,
         total_characters=total_characters,
+    )
+
+
+# Re-fits an already collected evidence bundle to a request-specific content
+# allowance. Files retain their deterministic priority order: complete higher
+# ranked excerpts are kept first, the final fitting excerpt may be shortened, and
+# lower-priority files are reported as skipped instead of disappearing silently.
+def trim_evidence_to_content_budget(
+    evidence: RepoEvidenceCollection,
+    max_content_characters: int,
+) -> RepoEvidenceCollection:
+    remaining = max(max_content_characters, 0)
+    selected_files: list[SelectedFileEvidence] = []
+    budget_skipped: list[SkippedFile] = []
+
+    for evidence_file in evidence.selected_files:
+        if remaining <= 0:
+            budget_skipped.append(
+                SkippedFile(
+                    path=evidence_file.path,
+                    source_type=evidence_file.source_type,
+                    reason=PROMPT_BUDGET_SKIP_REASON,
+                )
+            )
+            continue
+
+        content = evidence_file.content[:remaining]
+        if not content:
+            budget_skipped.append(
+                SkippedFile(
+                    path=evidence_file.path,
+                    source_type=evidence_file.source_type,
+                    reason=PROMPT_BUDGET_SKIP_REASON,
+                )
+            )
+            continue
+
+        shortened = len(content) < len(evidence_file.content)
+        selected_files.append(
+            SelectedFileEvidence(
+                path=evidence_file.path,
+                source_type=evidence_file.source_type,
+                reason=evidence_file.reason,
+                content=content,
+                original_size=evidence_file.original_size,
+                truncated=evidence_file.truncated or shortened,
+                char_count=len(content),
+            )
+        )
+        remaining -= len(content)
+
+    return RepoEvidenceCollection(
+        selected_files=selected_files,
+        skipped_files=[*evidence.skipped_files, *budget_skipped],
+        total_characters=sum(item.char_count for item in selected_files),
     )
 
 

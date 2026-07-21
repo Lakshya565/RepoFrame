@@ -1,6 +1,6 @@
 import {
-  type CommitActivityRange,
   type CommitActivityResponse,
+  type CommitActivityTimeline,
   type CommitTimelineBucket,
   type RankedRepoFile,
   type RepoFile,
@@ -167,41 +167,39 @@ function weeklyBuckets(endMondayISO: string, weeks: number): CommitTimelineBucke
   });
 }
 
-// Assembles a full response for one range from its buckets.
+// Assembles one timeline inside the bundled demo response.
 function commitActivity(
-  range: CommitActivityRange,
   intervalLabel: string,
   buckets: CommitTimelineBucket[],
   rangeEnd: string,
-): CommitActivityResponse {
+): CommitActivityTimeline {
   return {
-    owner: DEMO_PROJECT.owner,
-    repo: DEMO_PROJECT.repo,
-    normalizedUrl: DEMO_REPO_URL,
-    range,
     intervalLabel,
     totalCommits: buckets.reduce((sum, bucket) => sum + bucket.commitCount, 0),
     rangeStart: buckets[0]?.periodStart ?? null,
     rangeEnd,
-    contributorsTruncated: false,
     buckets,
   };
 }
 
-const DEMO_COMMIT_ACTIVITY: Record<CommitActivityRange, CommitActivityResponse> = {
+const DEMO_COMMIT_ACTIVITY_RANGES: CommitActivityResponse["ranges"] = {
   // Last 30 days, daily.
-  month: commitActivity("month", "1 day", dailyBuckets("2026-06-11", 30), "2026-07-10"),
+  month: commitActivity("1 day", dailyBuckets("2026-06-11", 30), "2026-07-10"),
   // Last 52 weeks, weekly (only the final ~5 weeks carry commits — the repo is young).
-  year: commitActivity("year", "1 week", weeklyBuckets("2026-07-06", 52), "2026-07-10"),
+  year: commitActivity("1 week", weeklyBuckets("2026-07-06", 52), "2026-07-10"),
   // Full history, weekly — the project is ~5 weeks old.
-  all: commitActivity("all", "1 week", weeklyBuckets("2026-07-06", 5), "2026-07-10"),
 };
 
 export function demoFetchCommitActivity(
-  _repoUrl: string,
-  range: CommitActivityRange,
+  repoUrl: string,
 ): Promise<CommitActivityResponse> {
-  return withDelay(DEMO_COMMIT_ACTIVITY[range]);
+  void repoUrl;
+  return withDelay({
+    owner: DEMO_PROJECT.owner,
+    repo: DEMO_PROJECT.repo,
+    normalizedUrl: DEMO_REPO_URL,
+    ranges: DEMO_COMMIT_ACTIVITY_RANGES,
+  });
 }
 
 // ── File tree (frozen snapshot of the REAL RepoFrame tracked files) ───────────

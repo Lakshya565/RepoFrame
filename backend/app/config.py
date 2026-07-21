@@ -33,6 +33,13 @@ MAX_TOTAL_PROMPT_CHARS: int = int(os.getenv("MAX_TOTAL_PROMPT_CHARS", "60000"))
 # Phase 7 uses it to skip large files before issuing a download request.
 MAX_FILE_SIZE_BYTES: int = int(os.getenv("MAX_FILE_SIZE_BYTES", "100000"))
 
+# Repository statistics are computed lazily by GitHub and can respond more slowly
+# than ordinary metadata/content endpoints. Isolate the longer timeout so other
+# GitHub calls keep their tighter failure bound.
+GITHUB_COMMIT_STATS_TIMEOUT_SECONDS: float = float(
+    os.getenv("GITHUB_COMMIT_STATS_TIMEOUT_SECONDS", "20")
+)
+
 
 # ============================================================
 # OpenAI

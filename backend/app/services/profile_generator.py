@@ -14,6 +14,7 @@ from app.services.llm_client import (
     openai_completion,
 )
 from app.services.prompt_format import format_evidence_excerpts, format_user_context
+from app.services.prompt_budget import fit_evidence_to_request_budget
 from app.services.tech_stack_detector import DetectedTechnology
 
 # Project-profile generation failures are LLM errors. This alias preserves the
@@ -100,16 +101,36 @@ def build_profile_prompt(
 # Builds the prompt, then delegates budget enforcement, the (injectable) OpenAI
 # call, and truncation/empty guards to the shared llm_client.complete, and finally
 # validates the returned JSON against ProjectProfile. Returns the parsed profile,
-# the pre-call token estimate, and the real token usage for cost tracking. Failures
-# are mapped to a ProfileGenerationError (LLMError) with a status for the route.
+# the pre-call token estimate, real token usage, and the exact fitted evidence used
+# for request accounting. Failures map to ProfileGenerationError for the route.
 def generate_project_profile(
     metadata: GitHubRepoMetadata,
     technologies: list[DetectedTechnology],
     evidence: RepoEvidenceCollection,
     user_context: UserContextInput,
     completion_fn: CompletionFn = openai_completion,
-) -> tuple[ProjectProfile, int, TokenUsage]:
-    user_prompt = build_profile_prompt(metadata, technologies, evidence, user_context)
+) -> tuple[ProjectProfile, int, TokenUsage, RepoEvidenceCollection]:
+    # The collector's raw content cap cannot know how much room metadata, user
+    # context, headings, and system instructions will consume. Measure the fully
+    # rendered request and fit only the evidence portion before the paid call.
+    fitted_evidence = fit_evidence_to_request_budget(
+        evidence,
+        lambda candidate: len(_SYSTEM_PROMPT)
+        + len(
+            build_profile_prompt(
+                metadata,
+                technologies,
+                candidate,
+                user_context,
+            )
+        ),
+    )
+    user_prompt = build_profile_prompt(
+        metadata,
+        technologies,
+        fitted_evidence,
+        user_context,
+    )
 
     content, estimated_tokens, usage = complete(
         _SYSTEM_PROMPT, user_prompt, completion_fn
@@ -129,4 +150,4 @@ def generate_project_profile(
             "OpenAI response was not valid JSON.", 502
         ) from exc
 
-    return profile, estimated_tokens, usage
+    return profile, estimated_tokens, usage, fitted_evidence

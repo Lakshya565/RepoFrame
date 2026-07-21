@@ -12,7 +12,6 @@ from app.services.github_service import (
     GitHubRateLimitError,
     GitHubTreeError,
     fetch_commit_activity,
-    fetch_contributor_weeks,
     fetch_repo_languages,
     fetch_repo_metadata,
     fetch_rate_limit,
@@ -171,6 +170,7 @@ class GitHubServiceTests(unittest.TestCase):
         self.assertEqual([week.total for week in weeks], [2, 4])
         requested_url = session.get.call_args.args[0]
         self.assertTrue(requested_url.endswith("/repos/openai/codex/stats/commit_activity"))
+        self.assertEqual(session.get.call_args.kwargs["timeout"], 20)
 
     def test_commit_activity_retries_while_computing_then_succeeds(self) -> None:
         # 202 means GitHub is still building the stats cache; a bounded retry should
@@ -199,6 +199,7 @@ class GitHubServiceTests(unittest.TestCase):
             )
 
         self.assertEqual(ctx.exception.status_code, 503)
+        self.assertEqual(session.get.call_count, 4)
 
     def test_commit_activity_empty_repository_returns_no_weeks(self) -> None:
         session = Mock()
@@ -218,43 +219,6 @@ class GitHubServiceTests(unittest.TestCase):
         weeks = fetch_commit_activity("openai", "codex", session=session)
 
         self.assertEqual(weeks[0].days, (0, 1, 0, 2, 0, 0, 0))
-
-    def test_contributor_weeks_sums_across_contributors(self) -> None:
-        session = Mock()
-        session.get.return_value = FakeResponse(
-            status_code=200,
-            payload=[
-                {"weeks": [{"w": 1_600_000_000, "c": 2}, {"w": 1_600_604_800, "c": 1}]},
-                {"weeks": [{"w": 1_600_000_000, "c": 3}, {"w": 1_600_604_800, "c": 0}]},
-            ],
-        )
-
-        weeks, truncated = fetch_contributor_weeks("openjdk", "jdk", session=session)
-
-        # Summed per week, oldest-first.
-        self.assertEqual([week.week_start for week in weeks], [1_600_000_000, 1_600_604_800])
-        self.assertEqual([week.total for week in weeks], [5, 1])
-        self.assertFalse(truncated)
-        requested_url = session.get.call_args.args[0]
-        self.assertTrue(requested_url.endswith("/repos/openjdk/jdk/stats/contributors"))
-
-    def test_contributor_weeks_flags_possible_truncation(self) -> None:
-        # GitHub caps this endpoint at 100 contributors; a full list may be truncated.
-        session = Mock()
-        session.get.return_value = FakeResponse(
-            status_code=200,
-            payload=[{"weeks": [{"w": 1_600_000_000, "c": 1}]}] * 100,
-        )
-
-        _weeks, truncated = fetch_contributor_weeks("big", "repo", session=session)
-
-        self.assertTrue(truncated)
-
-    def test_contributor_weeks_empty_repository(self) -> None:
-        session = Mock()
-        session.get.return_value = FakeResponse(status_code=204)
-
-        self.assertEqual(fetch_contributor_weeks("openai", "empty", session=session), ([], False))
 
     def test_supports_optional_github_token_header(self) -> None:
         session = Mock()

@@ -22,13 +22,6 @@ SECONDS_PER_WEEK = SECONDS_PER_DAY * DAYS_PER_WEEK
 # GitHub returns with each week.
 MONTH_LOOKBACK_DAYS = 30
 
-# The "all time" range always spans at least this many weeks (~1 year). A repository
-# younger than a year is padded with leading zero-count weeks so its timeline still
-# reads as a full year rising into the real data, rather than collapsing to a handful
-# of points. Matches the "1 year" view's grain (52 weeks lands on the 2-week rung).
-MIN_ALL_RANGE_WEEKS = 52
-
-
 # One bucketing choice: how many consecutive weekly counts to sum per bar, and the
 # human label for that grain.
 @dataclass(frozen=True)
@@ -136,7 +129,7 @@ def _weekly_samples(weeks: list[WeeklyCommitCount]) -> list[PeriodSample]:
 
 
 # Expands weekly counts into one sample per day using each week's daily breakdown,
-# oldest-first. Weeks without daily data (the full-history source) contribute nothing.
+# oldest-first. Weeks without a valid daily breakdown contribute nothing.
 def _daily_samples(weeks: list[WeeklyCommitCount]) -> list[PeriodSample]:
     samples: list[PeriodSample] = []
     for week in weeks:
@@ -151,35 +144,9 @@ def _daily_samples(weeks: list[WeeklyCommitCount]) -> list[PeriodSample]:
     return samples
 
 
-# Prepends zero-count weeks so `weeks` spans at least `min_weeks`, keeping the series
-# contiguous and chronological. Does nothing when the input is empty (no anchor date)
-# or already long enough, so it only ever widens a short-but-nonempty history.
-def _pad_leading_weeks(
-    weeks: list[WeeklyCommitCount], min_weeks: int
-) -> list[WeeklyCommitCount]:
-    if not weeks or len(weeks) >= min_weeks:
-        return weeks
-
-    first_start = weeks[0].week_start
-    missing = min_weeks - len(weeks)
-    padding = [
-        WeeklyCommitCount(
-            week_start=first_start - (missing - index) * SECONDS_PER_WEEK,
-            total=0,
-        )
-        for index in range(missing)
-    ]
-    return padding + weeks
-
-
-# Buckets weekly commit counts into an adaptive-interval timeline (the "1 year" and
-# "all time" ranges): the span across the weeks picks the grain from the ladder, then
-# consecutive weeks are chunked into bars. An empty input yields an empty timeline.
-# `min_weeks` floors the window length (used by "all time" to guarantee a full year).
-def build_commit_timeline(
-    weeks: list[WeeklyCommitCount], min_weeks: int = 0
-) -> CommitTimeline:
-    weeks = _pad_leading_weeks(weeks, min_weeks)
+# Buckets weekly commit counts into the 1Y timeline. The span selects the grain from
+# the deterministic ladder; GitHub currently supplies at most one year of data.
+def build_commit_timeline(weeks: list[WeeklyCommitCount]) -> CommitTimeline:
     if not weeks:
         return _bucket_samples([], 1, "")
 

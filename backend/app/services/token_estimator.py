@@ -26,9 +26,9 @@ def check_prompt_budget(
     max_chars: int = MAX_TOTAL_PROMPT_CHARS,
 ) -> tuple[bool, str]:
     """
-    Validates that evidence is within the prompt character budget before an
-    OpenAI call. Returns (within_budget, reason). When within_budget is False
-    the caller should trim the evidence or return a 413-style error.
+    Validates that the complete request context is within the character budget
+    before an OpenAI call. Repository evidence is fitted automatically upstream;
+    this final guard catches oversized non-evidence context and programming errors.
 
     Phase 10 integration note: call this at the start of the prompt-generation
     service, before constructing the final prompt string, so oversized payloads
@@ -40,7 +40,7 @@ def check_prompt_budget(
     estimated_tokens = estimate_input_tokens(total_chars)
     return (
         False,
-        f"Evidence is {total_chars:,} chars (~{estimated_tokens:,} tokens), "
+        f"Request context is {total_chars:,} chars (~{estimated_tokens:,} tokens), "
         f"which exceeds the {max_chars:,}-char prompt budget. "
-        "Trim the evidence before sending to OpenAI.",
+        "Reduce the user-provided or generated context before sending to OpenAI.",
     )

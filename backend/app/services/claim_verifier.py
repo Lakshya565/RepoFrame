@@ -4,11 +4,16 @@ from dataclasses import dataclass
 
 from pydantic import ValidationError
 
-from app.config import VERIFY_MAX_ITERATIONS, VERIFY_MAX_TOOL_CALLS
+from app.config import (
+    MAX_TOTAL_PROMPT_CHARS,
+    VERIFY_MAX_ITERATIONS,
+    VERIFY_MAX_TOOL_CALLS,
+)
 from app.schemas.outputs import GeneratedOutputs
 from app.schemas.profile import UserContextInput
 from app.schemas.verify import ClaimVerification, ClaimVerificationResult
 from app.services.evidence_investigator import EvidenceWorkspace
+from app.services.file_content_service import RepoEvidenceCollection
 from app.services.github_service import GitHubFileContentError
 from app.services.llm_client import (
     EMPTY_USAGE,
@@ -17,10 +22,15 @@ from app.services.llm_client import (
     LLMError,
     TokenUsage,
     ToolCall,
+    agent_request_chars,
     complete_with_tools,
     openai_agent_completion,
 )
 from app.services.prompt_format import format_evidence_excerpts, format_user_context
+from app.services.prompt_budget import (
+    PROMPT_SAFETY_MARGIN_CHARS,
+    fit_evidence_to_request_budget,
+)
 from app.services.token_estimator import estimate_input_tokens
 
 # The Evidence Investigator owns the bounded model loop and dispatches read-only
@@ -51,6 +61,12 @@ VERIFY_STAGE_COMPILING = "compiling"
 # or None. Optional everywhere — the non-streaming path passes nothing, so the
 # whole agent loop runs identically with progress reporting simply turned off.
 ProgressFn = Callable[[str, str | None], None]
+
+# The first investigator turn leaves room for tool-call messages and useful tool
+# output. Later results are fitted exactly, but reserving headroom avoids starting
+# a multi-turn conversation already pressed against the hard request ceiling.
+_VERIFY_CONVERSATION_RESERVE_CHARS = 8_000
+_TOOL_BUDGET_MESSAGE = "Prompt budget exhausted; use the evidence already gathered."
 
 
 # Fires a progress event when a sink is attached; a no-op otherwise, so threading
@@ -171,7 +187,7 @@ _SYSTEM_PROMPT = (
     "You are RepoFrame's Evidence Investigator. You check whether factual claims "
     "in generated project writeups are backed by repository evidence or the "
     "user-provided context.\n\n"
-    "The strongest deterministic repository evidence is provided IN FULL below. "
+    "The strongest deterministic repository evidence excerpts are provided below. "
     "Start with it. When it does not settle a repository-verifiable claim, use "
     "search_repository(query) to find candidate paths, read_repository_file(path) "
     "to inspect only the most relevant exact paths, and search_evidence(query) to "
@@ -281,21 +297,23 @@ def _format_claims(
 
 
 # Builds the initial user message: the claims to verify (optionally scoped to
-# specific tabs), the user context, and the full selected evidence inline (the
-# evidence is shown directly so the agent never judges blind; the optional tools
-# can also re-query it). User-context and evidence formatting are shared with
+# specific tabs), the user context, and the fitted selected evidence inline (the
+# evidence is shown directly so the agent never judges blind; optional tools can
+# inspect more). User-context and evidence formatting are shared with
 # profile generation via prompt_format.
 def _build_initial_prompt(
     outputs: GeneratedOutputs,
     user_context: UserContextInput,
     workspace: EvidenceWorkspace,
     sections: list[str] | None = None,
+    evidence: RepoEvidenceCollection | None = None,
 ) -> str:
     tree_note = (
         "GitHub reported a truncated tree; tools may use only paths in the known index."
         if workspace.tree_is_truncated
         else "The repository tree index is complete."
     )
+    selected_evidence = evidence if evidence is not None else workspace.initial_evidence
     return (
         "GENERATED OUTPUTS TO VERIFY\n"
         f"{_format_claims(outputs, sections)}\n\n"
@@ -304,8 +322,8 @@ def _build_initial_prompt(
         "REPOSITORY SCOPE\n"
         f"{workspace.owner}/{workspace.repo}@{workspace.ref}\n"
         f"{len(workspace.repository_index)} allowlisted paths. {tree_note}\n\n"
-        "INITIAL REPOSITORY EVIDENCE (selected files in full)\n"
-        f"{format_evidence_excerpts(workspace.initial_evidence, '(no initial evidence files were available)')}"
+        "INITIAL REPOSITORY EVIDENCE (ranked, bounded excerpts)\n"
+        f"{format_evidence_excerpts(selected_evidence, '(no initial evidence files were available)')}"
     )
 
 
@@ -345,6 +363,64 @@ def _assistant_tool_call_message(step: AgentStep) -> dict:
             for call in step.tool_calls
         ],
     }
+
+
+# Measures the larger of the next tool-enabled request and the reserved final
+# verdict request. Tool results must fit both shapes because either can be next.
+def _conversation_request_chars(messages: list[dict]) -> int:
+    next_tool_turn = agent_request_chars(messages, _TOOL_SCHEMAS)
+    final_turn = agent_request_chars(
+        [*messages, {"role": "user", "content": _FINAL_VERDICT_PROMPT}],
+        [],
+    )
+    return max(next_tool_turn, final_turn)
+
+
+# Trims one tool result against the conversation's exact serialized headroom while
+# reserving minimal result messages for any sibling calls from the same model turn.
+def _fit_tool_result(
+    messages: list[dict],
+    call: ToolCall,
+    content: str,
+    pending_call_ids: list[str],
+) -> str:
+    target = MAX_TOTAL_PROMPT_CHARS - PROMPT_SAFETY_MARGIN_CHARS
+
+    def request_chars(candidate_content: str) -> int:
+        candidate_messages = [
+            *messages,
+            {
+                "role": "tool",
+                "tool_call_id": call.id,
+                "content": candidate_content,
+            },
+            *[
+                {
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "content": _TOOL_BUDGET_MESSAGE,
+                }
+                for call_id in pending_call_ids
+            ],
+        ]
+        return _conversation_request_chars(candidate_messages)
+
+    if request_chars(content) <= target:
+        return content
+
+    suffix = "\n\n[Tool result truncated to fit the prompt budget.]"
+    low = 0
+    high = len(content)
+    best = _TOOL_BUDGET_MESSAGE
+    while low <= high:
+        midpoint = (low + high) // 2
+        candidate = content[:midpoint] + suffix
+        if request_chars(candidate) <= target:
+            best = candidate
+            low = midpoint + 1
+        else:
+            high = midpoint - 1
+    return best
 
 
 # Enforces the status/revision invariant the prompt asks for, in case the model
@@ -491,18 +567,44 @@ def verify_claims(
             investigation=_investigation_stats(workspace, 0, 0),
         )
 
+    # Fit the initial GitHub excerpts against the fully serialized tool-enabled
+    # request, including the user's latest outputs and the tool schemas. Additional
+    # reserve leaves useful room for the bounded investigation conversation.
+    fitted_evidence = fit_evidence_to_request_budget(
+        workspace.initial_evidence,
+        lambda candidate: agent_request_chars(
+            [
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": _build_initial_prompt(
+                        outputs,
+                        user_context,
+                        workspace,
+                        sections,
+                        candidate,
+                    ),
+                },
+            ],
+            _TOOL_SCHEMAS,
+        ),
+        safety_margin_characters=_VERIFY_CONVERSATION_RESERVE_CHARS,
+    )
+    workspace.replace_initial_evidence(fitted_evidence)
     initial_prompt = _build_initial_prompt(
         outputs,
         user_context,
         workspace,
         sections,
     )
-    estimated_tokens = estimate_input_tokens(len(_SYSTEM_PROMPT) + len(initial_prompt))
 
     messages: list[dict] = [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": initial_prompt},
     ]
+    estimated_tokens = estimate_input_tokens(
+        agent_request_chars(messages, _TOOL_SCHEMAS)
+    )
     total_usage = EMPTY_USAGE
     tool_calls_made = 0
     model_calls_made = 0
@@ -540,42 +642,63 @@ def verify_claims(
         # result, then loop for the model's next turn. Each call emits a "checking"
         # line describing the real evidence lookup.
         if step.tool_calls:
-            messages.append(_assistant_tool_call_message(step))
-            for call in step.tool_calls:
-                if tool_calls_made >= VERIFY_MAX_TOOL_CALLS:
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": call.id,
-                            "content": (
-                                "The tool-call limit is exhausted. Use the evidence "
-                                "already gathered and produce the final verdict."
-                            ),
-                        }
-                    )
-                    continue
+            assistant_message = _assistant_tool_call_message(step)
+            minimal_turn = [
+                *messages,
+                assistant_message,
+                *[
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.id,
+                        "content": _TOOL_BUDGET_MESSAGE,
+                    }
+                    for call in step.tool_calls
+                ],
+            ]
+            # A pathological assistant tool-call payload can itself consume the
+            # reserved headroom. Omit that uncommitted turn and proceed to the
+            # verdict rather than creating an invalid, oversized conversation.
+            if _conversation_request_chars(minimal_turn) > (
+                MAX_TOTAL_PROMPT_CHARS - PROMPT_SAFETY_MARGIN_CHARS
+            ):
+                break
 
-                tool_calls_made += 1
-                _emit(
-                    progress,
-                    VERIFY_STAGE_CHECKING,
-                    _describe_tool_call(call),
+            messages.append(assistant_message)
+            for index, call in enumerate(step.tool_calls):
+                if tool_calls_made >= VERIFY_MAX_TOOL_CALLS:
+                    tool_result = (
+                        "The tool-call limit is exhausted. Use the evidence already "
+                        "gathered and produce the final verdict."
+                    )
+                else:
+                    tool_calls_made += 1
+                    _emit(
+                        progress,
+                        VERIFY_STAGE_CHECKING,
+                        _describe_tool_call(call),
+                    )
+                    try:
+                        tool_result = _dispatch_tool(workspace, call)
+                    except GitHubFileContentError as exc:
+                        raise _verification_error(
+                            exc,
+                            workspace,
+                            total_usage,
+                            model_calls_made,
+                            tool_calls_made,
+                        ) from exc
+
+                fitted_tool_result = _fit_tool_result(
+                    messages,
+                    call,
+                    tool_result,
+                    [pending.id for pending in step.tool_calls[index + 1 :]],
                 )
-                try:
-                    tool_result = _dispatch_tool(workspace, call)
-                except GitHubFileContentError as exc:
-                    raise _verification_error(
-                        exc,
-                        workspace,
-                        total_usage,
-                        model_calls_made,
-                        tool_calls_made,
-                    ) from exc
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": call.id,
-                        "content": tool_result,
+                        "content": fitted_tool_result,
                     }
                 )
             continue
