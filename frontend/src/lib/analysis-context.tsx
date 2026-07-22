@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -209,6 +210,7 @@ export function AnalysisProvider({
   const pathname = usePathname();
   const demo = useDemo();
   const { status } = useAuth();
+  const previousAuthStatus = useRef(status);
   const cacheKey = `${demo ? "demo" : "live"}:${repoUrl.toLowerCase()}`;
   const [state, setState] = useState<AnalysisState>(() =>
     sessionCache.get(cacheKey)?.state ?? initialState(),
@@ -254,6 +256,12 @@ export function AnalysisProvider({
     if (pathname !== analysisPath) {
       return;
     }
+    // Wait for a persisted Supabase session before issuing a gated backend call.
+    // Signed-out production users see the demo/gate; open local development uses
+    // the separate "disabled" state and continues to analyze normally.
+    if (status === "loading" || (!demo && status === "signedOut")) {
+      return;
+    }
 
     const cached = sessionCache.get(cacheKey);
     if (cached) {
@@ -265,13 +273,17 @@ export function AnalysisProvider({
       }
     }
     return load(false);
-  }, [analysisPath, cacheKey, load, pathname]);
+  }, [analysisPath, cacheKey, demo, load, pathname, status]);
 
   useEffect(() => {
-    if (status === "signedOut") {
+    // Clear private session data only on a real signed-in -> signed-out change.
+    // Treating the initial signed-out resolution as a logout used to abort the
+    // demo/public load that had just started in the neighboring effect.
+    if (previousAuthStatus.current === "signedIn" && status === "signedOut") {
       clearAnalysisSessionCache();
       queueMicrotask(() => setState(initialState()));
     }
+    previousAuthStatus.current = status;
   }, [status]);
 
   const reload = useCallback(() => {

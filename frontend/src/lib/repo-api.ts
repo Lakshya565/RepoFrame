@@ -190,6 +190,13 @@ export async function streamRepoAnalysis(
   });
 
   if (!response.ok) {
+    // A frontend deployment can reach an older backend briefly while Render and
+    // Vercel roll independently. Fall back to the established JSON endpoints so
+    // one missing stream route cannot take every Analysis card offline.
+    if ([404, 405, 501].includes(response.status)) {
+      await fetchLegacyRepoAnalysis(repoUrl, onEvent, signal);
+      return;
+    }
     await parseResponse(response, "RepoFrame could not analyze this repository.");
     return;
   }
@@ -229,6 +236,39 @@ export async function streamRepoAnalysis(
   if (!completed) {
     throw new Error("Repository analysis ended before it completed.");
   }
+}
+
+// Temporary deployment-skew adapter. The ordinary path remains one progressive
+// stream; these four requests run only when the deployed backend lacks that route.
+async function fetchLegacyRepoAnalysis(
+  repoUrl: string,
+  onEvent: (event: RepoAnalysisStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (signal?.aborted) {
+    throw new DOMException("The operation was aborted.", "AbortError");
+  }
+
+  const startedAt = performance.now();
+  const [metadata, tree, rankedFiles, techStack] = await Promise.all([
+    fetchRepoMetadata(repoUrl),
+    fetchRepoTree(repoUrl),
+    fetchRankedRepoFiles(repoUrl),
+    fetchTechStack(repoUrl),
+  ]);
+
+  if (signal?.aborted) {
+    throw new DOMException("The operation was aborted.", "AbortError");
+  }
+  onEvent({ type: "metadata", data: metadata });
+  onEvent({ type: "structure", data: { tree, rankedFiles } });
+  onEvent({ type: "techStack", data: techStack });
+  onEvent({
+    type: "complete",
+    cacheStatus: "miss",
+    generatedAt: new Date().toISOString(),
+    durationMs: performance.now() - startedAt,
+  });
 }
 
 function parseAnalysisStreamFrame(
