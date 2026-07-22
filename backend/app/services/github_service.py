@@ -1,6 +1,9 @@
 import os
 import base64
+import hashlib
+import threading
 import time
+from collections import OrderedDict
 from collections.abc import Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -38,6 +41,92 @@ load_dotenv(BACKEND_ENV_FILE)
 _installation_token: ContextVar[str | None] = ContextVar(
     "installation_token", default=None
 )
+
+_CONDITIONAL_CACHE_ENTRIES = 256
+_conditional_cache_lock = threading.Lock()
+
+
+@dataclass(frozen=True)
+class _ConditionalEntry:
+    etag: str
+    payload: object
+
+
+class _CachedJsonResponse:
+    """Minimal response adapter used when GitHub confirms cached JSON with 304."""
+
+    status_code = 200
+    ok = True
+
+    def __init__(self, payload: object, headers: Mapping[str, str]) -> None:
+        self._payload = payload
+        self.headers = headers
+
+    def json(self) -> object:
+        return self._payload
+
+
+_conditional_cache: OrderedDict[str, _ConditionalEntry] = OrderedDict()
+
+
+def _conditional_key(
+    url: str,
+    headers: Mapping[str, str],
+    params: Mapping[str, str] | None,
+) -> str:
+    authorization = headers.get("Authorization", "anonymous")
+    scope = hashlib.sha256(authorization.encode()).hexdigest()[:16]
+    parameter_text = "&".join(
+        f"{key}={value}" for key, value in sorted((params or {}).items())
+    )
+    return f"{scope}:{url}?{parameter_text}"
+
+
+def _conditional_get(
+    client: requests.Session,
+    url: str,
+    *,
+    headers: dict[str, str],
+    timeout: int,
+    params: dict[str, str] | None = None,
+):
+    """Use ETags for JSON GETs while keeping cached private responses token-scoped."""
+    key = _conditional_key(url, headers, params)
+    with _conditional_cache_lock:
+        cached = _conditional_cache.get(key)
+        if cached:
+            _conditional_cache.move_to_end(key)
+
+    request_headers = dict(headers)
+    if cached:
+        request_headers["If-None-Match"] = cached.etag
+
+    kwargs = {"headers": request_headers, "timeout": timeout}
+    if params is not None:
+        kwargs["params"] = params
+    response = client.get(url, **kwargs)
+
+    if response.status_code == 304 and cached:
+        return _CachedJsonResponse(cached.payload, response.headers)
+
+    etag = response.headers.get("ETag") if response.status_code == 200 else None
+    if etag:
+        try:
+            payload = response.json()
+        except ValueError:
+            return response
+        with _conditional_cache_lock:
+            _conditional_cache[key] = _ConditionalEntry(etag, payload)
+            _conditional_cache.move_to_end(key)
+            while len(_conditional_cache) > _CONDITIONAL_CACHE_ENTRIES:
+                _conditional_cache.popitem(last=False)
+    return response
+
+
+def reset_conditional_cache() -> None:
+    """Clear cached validators and payloads for deterministic service tests."""
+    with _conditional_cache_lock:
+        _conditional_cache.clear()
 
 
 def set_installation_token(token: str | None) -> None:
@@ -163,7 +252,8 @@ def fetch_repo_metadata(
     client = session or requests.Session()
 
     try:
-        response = client.get(
+        response = _conditional_get(
+            client,
             f"{GITHUB_API_BASE_URL}/repos/{owner}/{repo}",
             headers=_build_headers(),
             timeout=REQUEST_TIMEOUT_SECONDS,
@@ -225,7 +315,8 @@ def fetch_repo_languages(
     client = session or requests.Session()
 
     try:
-        response = client.get(
+        response = _conditional_get(
+            client,
             f"{GITHUB_API_BASE_URL}/repos/{owner}/{repo}/languages",
             headers=_build_headers(),
             timeout=REQUEST_TIMEOUT_SECONDS,
@@ -370,7 +461,8 @@ def fetch_repo_tree(
     tree_ref = quote(default_branch, safe="")
 
     try:
-        response = client.get(
+        response = _conditional_get(
+            client,
             f"{GITHUB_API_BASE_URL}/repos/{owner}/{repo}/git/trees/{tree_ref}",
             params={"recursive": "1"},
             headers=_build_headers(),
@@ -436,7 +528,8 @@ def fetch_repo_text_file(
     encoded_path = quote(path, safe="/")
 
     try:
-        response = client.get(
+        response = _conditional_get(
+            client,
             f"{GITHUB_API_BASE_URL}/repos/{owner}/{repo}/contents/{encoded_path}",
             params={"ref": ref},
             headers=_build_headers(),

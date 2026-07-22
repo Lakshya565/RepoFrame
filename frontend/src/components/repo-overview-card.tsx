@@ -1,25 +1,35 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { ExternalLink } from "lucide-react";
 
-import {
-  fetchRepoMetadata,
-  type DetectedTechnology,
-  type RepoMetadataResponse,
+import type {
+  DetectedTechnology,
+  RepoMetadataResponse,
 } from "@/lib/repo-api";
-import { demoFetchRepoMetadata } from "@/lib/demo-analysis";
-import { useDemo } from "@/lib/demo-mode";
-import { useRepoResource, type RepoResource } from "@/lib/use-repo-resource";
+import type { RepoResource } from "@/lib/use-repo-resource";
 import { useGeneration } from "@/lib/generation-context";
-import { useTechStack } from "@/lib/tech-stack-context";
+import { useRepoAnalysis } from "@/lib/analysis-context";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/states";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { TechIconCloud } from "@/components/tech-icon-cloud";
+
+const TechIconCloud = dynamic(() =>
+  import("@/components/tech-icon-cloud").then((module) => module.TechIconCloud),
+  { loading: TechCloudSkeleton },
+);
+
+function TechCloudSkeleton() {
+  return (
+    <div className="mx-auto aspect-square w-full max-w-[340px]">
+      <Skeleton className="h-full w-full rounded-full" />
+    </div>
+  );
+}
 
 type RepoOverviewCardProps = {
   repoUrl: string;
@@ -27,23 +37,14 @@ type RepoOverviewCardProps = {
 
 const numberFormatter = new Intl.NumberFormat("en-US");
 
-const METADATA_ERROR = "RepoFrame could not fetch repository metadata.";
-
 // The repository "overview" hero card for the Analysis tab: the repository
 // summary and the tech-stack icon cloud sit side by side (roughly equal halves on
-// desktop). Repo metadata is fetched here; the tech stack comes from the shared
-// TechStackProvider (the same single fetch the Tech stack section below uses), so
-// the GitHub-backed detection only runs once. The clickable technology nodes live
+// desktop). Metadata and stack data come from the shared progressive analysis, so
+// the GitHub-backed pipeline only runs once. The clickable technology nodes live
 // in their own "Tech stack" section below this card (see TechStackCard).
 export function RepoOverviewCard({ repoUrl }: RepoOverviewCardProps) {
-  // In the signed-out demo, resolve from the frozen fixture instead of GitHub.
-  const demo = useDemo();
-  const metadata = useRepoResource(
-    repoUrl,
-    demo ? demoFetchRepoMetadata : fetchRepoMetadata,
-    METADATA_ERROR,
-  );
-  const techStack = useTechStack();
+  void repoUrl;
+  const { metadata, techStack } = useRepoAnalysis();
 
   // Lift the loaded metadata into the shared generation state so the auto-save
   // (which runs in the analysis layout, across tabs) has the repo facts a saved
@@ -184,16 +185,33 @@ function TechCloudSection({
   technologies: DetectedTechnology[] | null;
   isLoading: boolean;
 }) {
+  const [isIdle, setIsIdle] = useState(false);
+
+  useEffect(() => {
+    if (isLoading || !technologies?.length) {
+      return;
+    }
+
+    if (typeof window.requestIdleCallback === "function") {
+      const idleId = window.requestIdleCallback(() => setIsIdle(true), {
+        timeout: 1200,
+      });
+      return () => window.cancelIdleCallback(idleId);
+    }
+    const timeout = globalThis.setTimeout(() => setIsIdle(true), 200);
+    return () => globalThis.clearTimeout(timeout);
+  }, [isLoading, technologies]);
+
   if (isLoading) {
-    return (
-      <div className="mx-auto aspect-square w-full max-w-[340px]">
-        <Skeleton className="h-full w-full rounded-full" />
-      </div>
-    );
+    return <TechCloudSkeleton />;
   }
 
   if (!technologies || technologies.length === 0) {
     return null;
+  }
+
+  if (!isIdle) {
+    return <TechCloudSkeleton />;
   }
 
   return (

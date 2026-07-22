@@ -4,7 +4,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.schemas.github_app import ConnectionResponse, InstallRequest
-from app.services import github_app, installation_store, supabase_client
+from app.services import github_app, installation_store, repo_access, supabase_client
 from app.services.auth import AuthenticatedUser, require_user
 from app.services.github_app import GitHubAppError
 from app.services.installation_store import InstallationRecord
@@ -62,6 +62,7 @@ def install(
             repo_selection=account.repo_selection,
         )
     )
+    repo_access.reset_access_cache()
     return ConnectionResponse(
         installation_id=record.installation_id,
         account_login=record.account_login,
@@ -102,11 +103,13 @@ async def webhook(request: Request) -> dict:
     # ownership), so we don't create a mapping from an unauthenticated webhook.
     if event == "installation" and action == "deleted":
         repository.delete_by_installation(installation_id)
+        repo_access.reset_access_cache()
     elif event == "installation_repositories" or (
         event == "installation" and action == "new_permissions_accepted"
     ):
         selection = installation.get("repository_selection")
         if isinstance(selection, str):
             repository.set_repo_selection(installation_id, selection)
+            repo_access.reset_access_cache()
 
     return {"ok": True}

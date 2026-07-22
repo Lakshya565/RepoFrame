@@ -5,6 +5,9 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { AuthProvider } from "@/lib/auth-context";
 import { ScrollProgress } from "@/components/ui/scroll-progress";
 
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+
 // IBM Plex Sans for body/UI text and JetBrains Mono for code, file paths, and
 // data labels — a deliberate developer-tool pairing rather than a single generic
 // sans. Both are self-hosted by next/font (no external requests, no layout shift).
@@ -41,6 +44,9 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${plexSans.variable} ${jetBrainsMono.variable} h-full antialiased`}
     >
+      <head>
+        <link rel="preconnect" href={API_BASE_URL} />
+      </head>
       <body className="flex min-h-full flex-col">
         <ThemeProvider
           attribute="class"

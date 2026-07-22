@@ -2,9 +2,9 @@ import { RepoOverviewCard } from "@/components/repo-overview-card";
 import { TechStackCard } from "@/components/tech-stack-card";
 import { RepoCommitTimeline } from "@/components/repo-commit-timeline";
 import { ImportantFilesCard } from "@/components/important-files-card";
-import { RepoTreeView } from "@/components/repo-tree-view";
+import { LazyRepoTreeView } from "@/components/lazy-repo-tree-view";
 import { ScrollReveal } from "@/components/scroll-reveal";
-import { TechStackProvider } from "@/lib/tech-stack-context";
+import { AnalysisCardBoundary } from "@/components/analysis-card-boundary";
 import { repoUrlFromParams } from "@/lib/repo-url";
 
 type AnalysisTabPageProps = {
@@ -27,38 +27,46 @@ export default async function AnalysisTabPage({
       {/* Each card fades and lifts into view as it scrolls on screen. One shared
           fetch of the tech stack feeds both the overview card's icon cloud and the
           Tech stack section's tiles. */}
-      <TechStackProvider repoUrl={repoUrl}>
-        <ScrollReveal index={0}>
+      <ScrollReveal index={0}>
+        <AnalysisCardBoundary resetKey={`${repoUrl}:overview`}>
           <RepoOverviewCard repoUrl={repoUrl} />
-        </ScrollReveal>
+        </AnalysisCardBoundary>
+      </ScrollReveal>
 
-        <ScrollReveal index={1}>
+      <ScrollReveal index={1}>
+        <AnalysisCardBoundary resetKey={`${repoUrl}:stack`}>
           <section className="space-y-3">
             <h2 className="text-base font-semibold">Tech stack</h2>
             <TechStackCard />
           </section>
-        </ScrollReveal>
-      </TechStackProvider>
+        </AnalysisCardBoundary>
+      </ScrollReveal>
 
       <ScrollReveal index={2}>
-        <section className="space-y-3">
-          <h2 className="text-base font-semibold">Commit activity</h2>
-          <RepoCommitTimeline repoUrl={repoUrl} />
-        </section>
+        <AnalysisCardBoundary resetKey={`${repoUrl}:commits`}>
+          <section className="space-y-3">
+            <h2 className="text-base font-semibold">Commit activity</h2>
+            <RepoCommitTimeline repoUrl={repoUrl} />
+          </section>
+        </AnalysisCardBoundary>
       </ScrollReveal>
 
       <ScrollReveal index={3}>
-        <section className="space-y-3">
-          <h2 className="text-base font-semibold">Files we read</h2>
-          <ImportantFilesCard repoUrl={repoUrl} />
-        </section>
+        <AnalysisCardBoundary resetKey={`${repoUrl}:files`}>
+          <section className="space-y-3">
+            <h2 className="text-base font-semibold">Files we read</h2>
+            <ImportantFilesCard repoUrl={repoUrl} />
+          </section>
+        </AnalysisCardBoundary>
       </ScrollReveal>
 
       <ScrollReveal index={4}>
-        <section className="space-y-3">
-          <h2 className="text-base font-semibold">Repository structure</h2>
-          <RepoTreeView repoUrl={repoUrl} />
-        </section>
+        <AnalysisCardBoundary resetKey={`${repoUrl}:tree`}>
+          <section className="space-y-3">
+            <h2 className="text-base font-semibold">Repository structure</h2>
+            <LazyRepoTreeView repoUrl={repoUrl} />
+          </section>
+        </AnalysisCardBoundary>
       </ScrollReveal>
     </div>
   );

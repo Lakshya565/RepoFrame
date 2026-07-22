@@ -1,5 +1,18 @@
 import { getAccessToken } from "@/lib/supabase";
 import type { UserContext } from "@/lib/user-context";
+import {
+  combineLegacyCommitActivity,
+  parseCommitActivityPayload,
+  type CommitActivityRange,
+  type CommitActivityResponse,
+} from "@/lib/commit-activity";
+
+export type {
+  CommitActivityRange,
+  CommitActivityResponse,
+  CommitActivityTimeline,
+  CommitTimelineBucket,
+} from "@/lib/commit-activity";
 
 export type ParsedRepoResponse = {
   owner: string;
@@ -70,6 +83,29 @@ export type TechStackResponse = ParsedRepoResponse & {
   evidenceFilesRead: number;
 };
 
+export type AnalysisCacheStatus = "hit" | "stale" | "miss" | "shared";
+
+export type RepoAnalysisStreamEvent =
+  | { type: "metadata"; data: RepoMetadataResponse }
+  | {
+      type: "structure";
+      data: { tree: RepoTreeResponse; rankedFiles: RepoFileRankingResponse };
+    }
+  | { type: "techStack"; data: TechStackResponse }
+  | {
+      type: "complete";
+      cacheStatus: AnalysisCacheStatus;
+      generatedAt: string;
+      durationMs: number;
+    }
+  | {
+      type: "error";
+      stage: "metadata" | "structure" | "techStack" | "analysis";
+      detail: string;
+      status: number;
+      retryable: boolean;
+    };
+
 type ApiErrorResponse = {
   detail?: unknown;
 };
@@ -88,6 +124,18 @@ export class ApiError extends Error {
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+
+let backendWarmupStarted = false;
+
+// Best-effort process wake-up on analysis intent. The health endpoint does not
+// touch GitHub or OpenAI, and a failure never blocks the actual submit flow.
+export function warmBackend(): void {
+  if (backendWarmupStarted) {
+    return;
+  }
+  backendWarmupStarted = true;
+  void fetch(`${API_BASE_URL}/health`, { method: "GET" }).catch(() => undefined);
+}
 
 // Authorization header for backend calls that are login-gated when Supabase is
 // configured (analyze / generate / verify). Returns the signed-in user's Supabase
@@ -123,38 +171,122 @@ export async function fetchRepoMetadata(
   );
 }
 
-// The two supported windows derived from one last-year statistics response.
-export type CommitActivityRange = "month" | "year";
+// Opens the progressive core-analysis stream and forwards each validated event
+// as soon as it arrives. An in-stream error becomes the same ApiError shape used
+// by ordinary JSON requests, keeping card retry behavior consistent.
+export async function streamRepoAnalysis(
+  repoUrl: string,
+  onEvent: (event: RepoAnalysisStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/repo/analysis/stream`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders()),
+    },
+    body: JSON.stringify({ repoUrl }),
+    signal,
+  });
 
-// One bar of the commit-activity timeline: the UTC ISO date the bucket starts on
-// and the commits summed into it.
-export type CommitTimelineBucket = {
-  periodStart: string;
-  commitCount: number;
-};
+  if (!response.ok) {
+    await parseResponse(response, "RepoFrame could not analyze this repository.");
+    return;
+  }
+  if (!response.body) {
+    throw new Error("RepoFrame could not open the repository analysis stream.");
+  }
 
-// One timeline in the bundled response, including its grain and date bounds.
-export type CommitActivityTimeline = {
-  intervalLabel: string;
-  totalCommits: number;
-  rangeStart: string | null;
-  rangeEnd: string | null;
-  buckets: CommitTimelineBucket[];
-};
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let completed = false;
 
-export type CommitActivityResponse = ParsedRepoResponse & {
-  ranges: Record<CommitActivityRange, CommitActivityTimeline>;
-};
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    const frames = buffer.split(/\r?\n\r?\n/);
+    buffer = frames.pop() ?? "";
 
-// Fetches both bucketed timelines together so range changes stay local.
+    for (const frame of frames) {
+      const event = parseAnalysisStreamFrame(frame);
+      if (!event) {
+        continue;
+      }
+      onEvent(event);
+      if (event.type === "complete") {
+        completed = true;
+      } else if (event.type === "error") {
+        throw new ApiError(event.detail, event.status);
+      }
+    }
+
+    if (done) {
+      break;
+    }
+  }
+
+  if (!completed) {
+    throw new Error("Repository analysis ended before it completed.");
+  }
+}
+
+function parseAnalysisStreamFrame(
+  frame: string,
+): RepoAnalysisStreamEvent | null {
+  const data = frame
+    .split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice("data:".length).trim())
+    .join("\n");
+  if (!data) {
+    return null;
+  }
+
+  try {
+    const event = JSON.parse(data) as unknown;
+    if (
+      typeof event === "object" &&
+      event !== null &&
+      "type" in event &&
+      typeof event.type === "string"
+    ) {
+      return event as RepoAnalysisStreamEvent;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+// Fetches both bucketed timelines together so range changes stay local. During
+// one staggered deployment window, an older backend may still return one range;
+// detect that contract and explicitly fetch the missing month before normalizing.
 export async function fetchCommitActivity(
   repoUrl: string,
 ): Promise<CommitActivityResponse> {
-  return postRepoRequest(
+  const payload = await postRepoRequest<unknown>(
     "/api/repo/commit-activity",
     repoUrl,
     "RepoFrame could not fetch commit activity.",
   );
+  const parsed = parseCommitActivityPayload(payload);
+  if (parsed.kind === "bundled") {
+    return parsed.data;
+  }
+
+  const missingRange: CommitActivityRange =
+    parsed.data.range === "year" ? "month" : "year";
+  const fallbackPayload = await postJson<unknown>(
+    "/api/repo/commit-activity",
+    { repoUrl, range: missingRange },
+    "RepoFrame could not fetch commit activity.",
+  );
+  const fallback = parseCommitActivityPayload(fallbackPayload);
+  if (fallback.kind === "bundled") {
+    return fallback.data;
+  }
+  return combineLegacyCommitActivity(parsed.data, fallback.data);
 }
 
 // GitHub computes its /stats/* endpoints lazily and returns "still computing" (which
@@ -165,8 +297,15 @@ export async function fetchCommitActivity(
 // (and the final 503) propagate normally to the error state + manual retry.
 const COMMIT_ACTIVITY_RETRY_ATTEMPTS = 4;
 const COMMIT_ACTIVITY_RETRY_DELAY_MS = 2500;
+const SESSION_CACHE_FRESH_MS = 5 * 60 * 1000;
+const SESSION_CACHE_MAX_REPOS = 10;
+const commitSessionCache = new Map<
+  string,
+  { data: CommitActivityResponse; cachedAt: number }
+>();
+const commitInflight = new Map<string, Promise<CommitActivityResponse>>();
 
-export async function fetchCommitActivityPolling(
+async function fetchCommitActivityPollingUncached(
   repoUrl: string,
 ): Promise<CommitActivityResponse> {
   for (let attempt = 0; attempt < COMMIT_ACTIVITY_RETRY_ATTEMPTS; attempt += 1) {
@@ -185,6 +324,46 @@ export async function fetchCommitActivityPolling(
   }
   // Unreachable — the loop always returns or throws — but keeps the return type sound.
   return fetchCommitActivity(repoUrl);
+}
+
+export async function fetchCommitActivityPolling(
+  repoUrl: string,
+): Promise<CommitActivityResponse> {
+  const cacheKey = repoUrl.toLowerCase();
+  const cached = commitSessionCache.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < SESSION_CACHE_FRESH_MS) {
+    commitSessionCache.delete(cacheKey);
+    commitSessionCache.set(cacheKey, cached);
+    return cached.data;
+  }
+
+  const existing = commitInflight.get(cacheKey);
+  if (existing) {
+    return existing;
+  }
+
+  const request = fetchCommitActivityPollingUncached(repoUrl).then((data) => {
+    commitSessionCache.set(cacheKey, { data, cachedAt: Date.now() });
+    while (commitSessionCache.size > SESSION_CACHE_MAX_REPOS) {
+      const oldest = commitSessionCache.keys().next().value;
+      if (typeof oldest === "string") {
+        commitSessionCache.delete(oldest);
+      }
+    }
+    return data;
+  });
+
+  commitInflight.set(cacheKey, request);
+  try {
+    return await request;
+  } finally {
+    commitInflight.delete(cacheKey);
+  }
+}
+
+export function clearRepoSessionCaches(): void {
+  commitSessionCache.clear();
+  commitInflight.clear();
 }
 
 // Fetches the recursive repository tree for the structure panel. The backend

@@ -6,10 +6,11 @@ import threading
 from collections import Counter
 from collections.abc import AsyncIterator
 
+import requests
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from app.services import repo_access
+from app.services import analysis_service
 from app.services.auth import AuthenticatedUser, require_user_when_configured
 
 from app.config import OPENAI_MODEL
@@ -43,14 +44,11 @@ from app.services.evidence_investigator import build_evidence_workspace
 from app.services.file_content_service import (
     collect_file_evidence,
 )
-from app.services.file_ranker import rank_important_files
 from app.services.github_service import (
     GitHubFileContentError,
     GitHubMetadataError,
     GitHubTreeError,
-    fetch_repo_languages,
-    fetch_repo_metadata,
-    fetch_repo_tree,
+    fetch_repo_text_file,
 )
 from app.services.llm_client import LLMError
 from app.services.output_generator import (
@@ -64,10 +62,6 @@ from app.services.profile_generator import (
     generate_project_profile,
 )
 from app.services.repo_parser import RepoUrlParseError, parse_github_repo_url
-from app.services.tech_stack_detector import (
-    collect_stack_evidence,
-    detect_tech_stack,
-)
 
 # Login gate (Phase 15.3): when Supabase is configured, every generation/verify
 # endpoint requires a verified user; when unconfigured (local dev), they stay open.
@@ -95,38 +89,24 @@ def generate_profile(
     # Enforce the daily spend caps before any paid work (Phase 16.3); 429 if at cap.
     rate_limit.enforce_llm_quota(user)
     try:
-        parsed_repo = parse_github_repo_url(request.repo_url)
-        repo_access.apply_repo_access(user, parsed_repo.owner, parsed_repo.repo)
-        metadata = fetch_repo_metadata(parsed_repo.owner, parsed_repo.repo)
-        tree = fetch_repo_tree(
-            parsed_repo.owner,
-            parsed_repo.repo,
-            metadata.default_branch,
-        )
-        ranked_files = rank_important_files(tree.files)
-
-        # Tech-stack detection reads only ranked README/manifest files (Phase 6),
-        # tolerating per-file gaps so a missing manifest does not fail the run.
-        file_contents = collect_stack_evidence(
-            parsed_repo.owner,
-            parsed_repo.repo,
-            metadata.default_branch,
-            ranked_files,
-        )
-        # The full per-language byte breakdown (best-effort: {} on failure) so the
-        # profile is grounded in every meaningful language, not just the top one.
-        languages = fetch_repo_languages(parsed_repo.owner, parsed_repo.repo)
-        technologies = detect_tech_stack(
-            metadata, ranked_files, file_contents, languages
-        )
+        analysis = analysis_service.get_repo_analysis(request.repo_url, user).value
+        parsed_repo = analysis.parsed_repo
+        metadata = analysis.metadata
+        tree = analysis.tree
+        technologies = analysis.technologies
 
         # Bounded source/README/config evidence (Phase 7) feeds the prompt body.
-        evidence = collect_file_evidence(
-            parsed_repo.owner,
-            parsed_repo.repo,
-            metadata.default_branch,
-            ranked_files,
-        )
+        session = requests.Session()
+        try:
+            evidence = collect_file_evidence(
+                parsed_repo.owner,
+                parsed_repo.repo,
+                metadata.default_branch,
+                analysis.ranked_files,
+                fetcher=lambda *args: fetch_repo_text_file(*args, session=session),
+            )
+        finally:
+            session.close()
 
         # Prompt construction, budget enforcement, and the OpenAI call all happen
         # inside the generator; it returns the validated profile, the pre-call

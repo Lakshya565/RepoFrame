@@ -22,6 +22,7 @@ export function useRepoResource<T>(
   repoUrl: string,
   fetcher: (repoUrl: string) => Promise<T>,
   fallbackMessage: string,
+  enabled = true,
 ): RepoResource<T> {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +31,9 @@ export function useRepoResource<T>(
   // Manual retry: no stale guard needed since it's a deliberate, user-triggered
   // refetch of the current repo.
   const reload = useCallback(async () => {
+    if (!enabled) {
+      return;
+    }
     setIsLoading(true);
     setError(null);
 
@@ -41,11 +45,14 @@ export function useRepoResource<T>(
     } finally {
       setIsLoading(false);
     }
-  }, [repoUrl, fetcher, fallbackMessage]);
+  }, [repoUrl, fetcher, fallbackMessage, enabled]);
 
   // Initial load, re-run whenever the repo changes. The isCurrentRequest flag
   // discards a response that arrives after the repo has already changed.
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     let isCurrentRequest = true;
 
     async function run() {
@@ -74,7 +81,7 @@ export function useRepoResource<T>(
     return () => {
       isCurrentRequest = false;
     };
-  }, [repoUrl, fetcher, fallbackMessage]);
+  }, [repoUrl, fetcher, fallbackMessage, enabled]);
 
   return { data, error, isLoading, reload };
 }

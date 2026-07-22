@@ -1,16 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
 import { Popover } from "radix-ui";
 import { File, X } from "lucide-react";
 
-import {
-  fetchRankedRepoFiles,
-  type RepoFileRankingResponse,
-  type RankedRepoFile,
-} from "@/lib/repo-api";
-import { demoFetchRankedFiles } from "@/lib/demo-analysis";
-import { useDemo } from "@/lib/demo-mode";
+import { type RankedRepoFile } from "@/lib/repo-api";
+import { useRepoAnalysis } from "@/lib/analysis-context";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/states";
@@ -24,74 +18,10 @@ const numberFormatter = new Intl.NumberFormat("en-US");
 // Shows the deterministic Phase 5 file selections. These are the files
 // RepoFrame considers most useful for later evidence gathering and generation.
 export function ImportantFilesCard({ repoUrl }: ImportantFilesCardProps) {
-  // In the signed-out demo the ranking is served from a frozen snapshot
-  // (demo-analysis.ts) rather than the backend, so /demo makes no request.
-  const demo = useDemo();
-  const [ranking, setRanking] = useState<RepoFileRankingResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  // Reloads the ranking request for both initial fetches and user-triggered
-  // retries. The backend owns all score and filtering rules.
-  const loadRanking = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const rankedFiles = await (demo
-        ? demoFetchRankedFiles()
-        : fetchRankedRepoFiles(repoUrl));
-      setRanking(rankedFiles);
-    } catch (error) {
-      setRanking(null);
-      setError(
-        error instanceof Error
-          ? error.message
-          : "RepoFrame could not rank important repository files.",
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  }, [repoUrl, demo]);
-
-  // Runs the initial ranking fetch for the current repo URL and ignores stale
-  // responses if the page changes before the backend responds.
-  useEffect(() => {
-    let isCurrentRequest = true;
-
-    async function run() {
-      setIsLoading(true);
-      setError(null);
-
-      try {
-        const rankedFiles = await (demo
-          ? demoFetchRankedFiles()
-          : fetchRankedRepoFiles(repoUrl));
-        if (isCurrentRequest) {
-          setRanking(rankedFiles);
-        }
-      } catch (error) {
-        if (isCurrentRequest) {
-          setRanking(null);
-          setError(
-            error instanceof Error
-              ? error.message
-              : "RepoFrame could not rank important repository files.",
-          );
-        }
-      } finally {
-        if (isCurrentRequest) {
-          setIsLoading(false);
-        }
-      }
-    }
-
-    run();
-
-    return () => {
-      isCurrentRequest = false;
-    };
-  }, [repoUrl, demo]);
+  void repoUrl;
+  const {
+    ranking: { data: ranking, error, isLoading, reload },
+  } = useRepoAnalysis();
 
   if (isLoading) {
     return (
@@ -111,7 +41,7 @@ export function ImportantFilesCard({ repoUrl }: ImportantFilesCardProps) {
       <ErrorState
         title="File ranking unavailable"
         message={error}
-        onRetry={loadRanking}
+        onRetry={reload}
       />
     );
   }

@@ -17,6 +17,7 @@ from app.services.github_service import (
     fetch_rate_limit,
     fetch_repo_text_file,
     fetch_repo_tree,
+    reset_conditional_cache,
 )
 
 
@@ -47,6 +48,12 @@ class FakeResponse:
 # Covers GitHub service parsing and error mapping without network access. The
 # tests keep GitHub behavior deterministic by injecting fake response objects.
 class GitHubServiceTests(unittest.TestCase):
+    def setUp(self) -> None:
+        reset_conditional_cache()
+
+    def tearDown(self) -> None:
+        reset_conditional_cache()
+
     def test_fetches_repo_metadata(self) -> None:
         session = Mock()
         session.get.return_value = FakeResponse(
@@ -71,6 +78,31 @@ class GitHubServiceTests(unittest.TestCase):
         self.assertEqual(metadata.forks, 45)
         self.assertEqual(metadata.language, "TypeScript")
         self.assertEqual(metadata.html_url, "https://github.com/openai/codex")
+
+    def test_metadata_reuses_payload_when_etag_returns_not_modified(self) -> None:
+        payload = {
+            "name": "codex",
+            "description": "Coding agent",
+            "default_branch": "main",
+            "stargazers_count": 123,
+            "forks_count": 45,
+            "language": "TypeScript",
+            "html_url": "https://github.com/openai/codex",
+        }
+        session = Mock()
+        session.get.side_effect = [
+            FakeResponse(status_code=200, payload=payload, headers={"ETag": '"v1"'}),
+            FakeResponse(status_code=304),
+        ]
+
+        first = fetch_repo_metadata("openai", "codex", session=session)
+        second = fetch_repo_metadata("openai", "codex", session=session)
+
+        self.assertEqual(first, second)
+        self.assertEqual(
+            session.get.call_args_list[1].kwargs["headers"]["If-None-Match"],
+            '"v1"',
+        )
 
     def test_parses_topics_and_license_from_metadata(self) -> None:
         session = Mock()

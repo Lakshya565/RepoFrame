@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Loader2 } from "lucide-react";
 
-import { parseRepoUrl } from "@/lib/repo-api";
+import { parseRepoUrl, warmBackend } from "@/lib/repo-api";
 import { useAuth } from "@/lib/auth-context";
 import { isDemoActive } from "@/lib/demo-fixture";
 import { listProjects } from "@/lib/projects-api";
@@ -184,6 +184,7 @@ export function RepoUrlForm() {
               setError(null);
             }
           }}
+          onFocus={warmBackend}
           placeholder="https://github.com/{owner}/{repo}"
           type="url"
           value={repoUrl}

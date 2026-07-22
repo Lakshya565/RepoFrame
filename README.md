@@ -66,6 +66,7 @@ backend/
       prompt_format.py      ← shared prompt formatting (user context, evidence excerpts)
       prompt_budget.py      ← request-aware evidence fitting before OpenAI calls
       metrics_store.py      ← Phase 13: in-memory operational + claim-quality metrics
+      analysis_service.py   ← progressive repo pipeline, SWR caches, and single-flight work
   data/                ← Phase 12: usage.json ledger (git-ignored, local state)
   requirements.txt
 ```
@@ -165,6 +166,7 @@ Phases 1 through 13 are implemented. The app has a landing page with a GitHub re
 
 - `GET /health` — service health check.
 - `POST /api/repo/parse` — normalize a GitHub URL into owner/repo.
+- `POST /api/repo/analysis/stream` — progressively return metadata, structure/ranking, and tech-stack events from one shared repository analysis.
 - `POST /api/repo/metadata` — fetch public repository metadata.
 - `POST /api/repo/commit-activity` — fetch GitHub's last-year statistics once and return bundled 1M/1Y timelines.
 - `POST /api/repo/tree` — fetch the default-branch file tree.
@@ -179,6 +181,13 @@ Phases 1 through 13 are implemented. The app has a landing page with a GitHub re
 - `GET /api/github/rate-limit` — report the current GitHub REST API budget.
 - `GET /api/usage/total` — report the persistent lifetime OpenAI token totals recorded by the backend.
 - `GET /api/metrics` — report operational and claim-quality metrics (repos analyzed, files scanned/selected, outputs generated, claim verification counts by status, request/error counts, LLM/backend latency).
+
+The Analysis tab uses the progressive stream for its core cards, then starts the
+separate commit-statistics request after the core data settles. Core analysis and
+commit activity use bounded process-memory caches with five-minute freshness,
+thirty-minute stale-while-revalidate service, single-flight request deduplication,
+and GitHub ETag revalidation. Private cache keys include the authenticated user and
+installation; tokens remain process-memory-only and expire before GitHub's deadline.
 
 Phase 7 file-content fetching is intentionally bounded: it selects README, dependency/config manifests, and the top-ranked source files, then enforces a maximum number of files, a per-file character limit, and a total character limit across all excerpts. Files that are missing, oversized, non-text, or beyond the limits are returned as skipped with a clear reason, so the evidence stays small and auditable.
 

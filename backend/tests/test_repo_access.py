@@ -39,6 +39,7 @@ class BuildHeadersTokenTests(unittest.TestCase):
 # that actually grants the requested repo; otherwise the public path (None).
 class ResolveInstallationTokenTests(unittest.TestCase):
     def setUp(self) -> None:
+        repo_access.reset_access_cache()
         self.user = AuthenticatedUser(user_id="u1", github_id="999")
         self._cfg = [
             patch.object(config, "GITHUB_APP_ID", "123"),
@@ -50,6 +51,7 @@ class ResolveInstallationTokenTests(unittest.TestCase):
             p.start()
 
     def tearDown(self) -> None:
+        repo_access.reset_access_cache()
         for p in self._cfg:
             p.stop()
 
@@ -87,6 +89,29 @@ class ResolveInstallationTokenTests(unittest.TestCase):
         ):
             token = repo_access.resolve_installation_token(self.user, "octo", "repo")
         self.assertEqual(token, "ghs_x")
+
+    def test_reuses_unexpired_token_and_repository_list(self) -> None:
+        record = InstallationRecord("u1", 42, 999, "octo", "selected")
+        with self._with_installation(record), patch.object(
+            github_app,
+            "mint_installation_token",
+            return_value=InstallationToken("ghs_x", ""),
+        ) as mint, patch.object(
+            github_app,
+            "list_installation_repositories",
+            return_value=[{"full_name": "octo/repo"}],
+        ) as list_repositories:
+            first = repo_access.resolve_installation_token(
+                self.user, "octo", "repo"
+            )
+            second = repo_access.resolve_installation_token(
+                self.user, "octo", "repo"
+            )
+
+        self.assertEqual(first, "ghs_x")
+        self.assertEqual(second, "ghs_x")
+        mint.assert_called_once_with(42)
+        list_repositories.assert_called_once_with("ghs_x")
 
     def test_none_when_repo_not_in_installation(self) -> None:
         record = InstallationRecord("u1", 42, 999, "octo", "selected")

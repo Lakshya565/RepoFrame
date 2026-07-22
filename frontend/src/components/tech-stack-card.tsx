@@ -1,6 +1,6 @@
 "use client";
 
-import { useTechStack } from "@/lib/tech-stack-context";
+import { useRepoAnalysis } from "@/lib/analysis-context";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/states";
@@ -13,7 +13,7 @@ import { TechStackNodes, TECH_TILE_WIDTH } from "@/components/tech-stack-nodes";
 // single fetch the overview card's icon cloud reads — so the GitHub-backed
 // detection runs only once per repo.
 export function TechStackCard() {
-  const { data, error, isLoading, reload } = useTechStack();
+  const { data, error, isLoading, reload } = useRepoAnalysis().techStack;
 
   if (isLoading) {
     return (

@@ -1,48 +1,40 @@
+import asyncio
+import json
+import logging
+import queue
+import threading
+import time
+from collections.abc import AsyncIterator
+
+import requests
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 
 from app.schemas.repo import (
-    CommitActivityRanges,
     CommitActivityResponse,
-    CommitActivityTimeline,
-    CommitTimelineBucket,
-    DetectedTechnology,
-    RankedRepoFile,
     RepoFileContentResponse,
     RepoFileRankingResponse,
-    RepoFile,
     RepoMetadataResponse,
     RepoParseRequest,
     RepoParseResponse,
     RepoTreeResponse,
     SelectedFileEvidence,
     SkippedFileEvidence,
-    TechStackEvidence,
     TechStackResponse,
 )
-from app.services.commit_activity import (
-    CommitTimeline,
-    build_commit_timeline,
-    build_daily_timeline,
-)
+from app.services import analysis_service
 from app.services.file_content_service import collect_file_evidence
-from app.services.file_ranker import filter_repo_files, rank_important_files
 from app.services.github_service import (
     GitHubCommitActivityError,
     GitHubFileContentError,
     GitHubMetadataError,
     GitHubTreeError,
-    fetch_commit_activity,
-    fetch_repo_languages,
-    fetch_repo_metadata,
-    fetch_repo_tree,
+    fetch_repo_text_file,
 )
-from app.services import repo_access
 from app.services.auth import AuthenticatedUser, require_user_or_public_demo
 from app.services.repo_parser import RepoUrlParseError, parse_github_repo_url
-from app.services.tech_stack_detector import (
-    collect_stack_evidence,
-    detect_tech_stack,
-)
+
+logger = logging.getLogger(__name__)
 
 # Login gate (Phase 15.3): when Supabase is configured, the repo-analysis
 # endpoints require a verified user; when unconfigured (local dev), they stay open.
@@ -73,6 +65,104 @@ def parse_repo(request: RepoParseRequest) -> RepoParseResponse:
     )
 
 
+# Streams the shared core analysis as soon as each dependency stage completes.
+# Work remains synchronous because the GitHub client is requests-based, so a
+# worker thread feeds JSON events through a queue without blocking FastAPI's loop.
+@router.post("/analysis/stream")
+async def stream_repo_analysis(
+    request: RepoParseRequest,
+    user: AuthenticatedUser | None = Depends(require_user_or_public_demo),
+) -> StreamingResponse:
+    event_queue: queue.Queue[dict | None] = queue.Queue()
+
+    def emit(payload: dict) -> None:
+        event_queue.put(payload)
+
+    def stage_event(stage: str, payload: object) -> None:
+        if hasattr(payload, "model_dump"):
+            data = payload.model_dump(by_alias=True)
+        elif isinstance(payload, dict):
+            data = {
+                key: value.model_dump(by_alias=True)
+                if hasattr(value, "model_dump")
+                else value
+                for key, value in payload.items()
+            }
+        else:
+            data = payload
+        emit({"type": stage, "data": data})
+
+    def run_analysis() -> None:
+        started = time.perf_counter()
+        try:
+            result = analysis_service.get_repo_analysis(
+                request.repo_url, user, callback=stage_event
+            )
+            emit(
+                {
+                    "type": "complete",
+                    "cacheStatus": result.status,
+                    "generatedAt": result.value.generated_at,
+                    "durationMs": round((time.perf_counter() - started) * 1000, 2),
+                }
+            )
+        except RepoUrlParseError as exc:
+            emit(
+                {
+                    "type": "error",
+                    "stage": "metadata",
+                    "detail": str(exc),
+                    "status": 400,
+                    "retryable": False,
+                }
+            )
+        except (GitHubMetadataError, GitHubTreeError, GitHubFileContentError) as exc:
+            stage = (
+                "metadata"
+                if isinstance(exc, GitHubMetadataError)
+                else "structure"
+                if isinstance(exc, GitHubTreeError)
+                else "techStack"
+            )
+            emit(
+                {
+                    "type": "error",
+                    "stage": stage,
+                    "detail": str(exc),
+                    "status": exc.status_code,
+                    "retryable": exc.status_code >= 500 or exc.status_code == 429,
+                }
+            )
+        except Exception:  # noqa: BLE001 - the stream must always terminate cleanly
+            logger.exception("Unexpected error during streamed repository analysis")
+            emit(
+                {
+                    "type": "error",
+                    "stage": "analysis",
+                    "detail": "Repository analysis failed unexpectedly.",
+                    "status": 500,
+                    "retryable": True,
+                }
+            )
+        finally:
+            event_queue.put(None)
+
+    async def event_source() -> AsyncIterator[str]:
+        loop = asyncio.get_running_loop()
+        threading.Thread(target=run_analysis, daemon=True).start()
+        while True:
+            event = await loop.run_in_executor(None, event_queue.get)
+            if event is None:
+                break
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        event_source(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 # Parses the URL, fetches GitHub repo metadata, and shapes it for the frontend.
 # Route logic is limited to service orchestration and HTTP error translation.
 @router.post("/metadata", response_model=RepoMetadataResponse)
@@ -81,28 +171,15 @@ def get_repo_metadata(
     user: AuthenticatedUser | None = Depends(require_user_or_public_demo),
 ) -> RepoMetadataResponse:
     try:
-        parsed_repo = parse_github_repo_url(request.repo_url)
-        repo_access.apply_repo_access(user, parsed_repo.owner, parsed_repo.repo)
-        metadata = fetch_repo_metadata(parsed_repo.owner, parsed_repo.repo)
+        return analysis_service.get_repo_analysis(
+            request.repo_url, user
+        ).value.metadata_response()
     except RepoUrlParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except GitHubMetadataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-
-    return RepoMetadataResponse(
-        owner=parsed_repo.owner,
-        repo=parsed_repo.repo,
-        normalized_url=parsed_repo.normalized_url,
-        name=metadata.name,
-        description=metadata.description,
-        default_branch=metadata.default_branch,
-        stars=metadata.stars,
-        forks=metadata.forks,
-        language=metadata.language,
-        html_url=metadata.html_url,
-        topics=metadata.topics,
-        license=metadata.license,
-    )
+    except (GitHubTreeError, GitHubFileContentError) as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
 # Fetches GitHub's last-year statistics once and derives both supported timelines.
@@ -113,42 +190,11 @@ def get_repo_commit_activity(
     user: AuthenticatedUser | None = Depends(require_user_or_public_demo),
 ) -> CommitActivityResponse:
     try:
-        parsed_repo = parse_github_repo_url(request.repo_url)
-        repo_access.apply_repo_access(user, parsed_repo.owner, parsed_repo.repo)
-        weeks = fetch_commit_activity(parsed_repo.owner, parsed_repo.repo)
-        month = build_daily_timeline(weeks)
-        year = build_commit_timeline(weeks)
+        return analysis_service.get_commit_activity(request.repo_url, user).value
     except RepoUrlParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except GitHubCommitActivityError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-
-    return CommitActivityResponse(
-        owner=parsed_repo.owner,
-        repo=parsed_repo.repo,
-        normalized_url=parsed_repo.normalized_url,
-        ranges=CommitActivityRanges(
-            month=_commit_timeline_response(month),
-            year=_commit_timeline_response(year),
-        ),
-    )
-
-
-# Maps the deterministic service result into the public API model for either range.
-def _commit_timeline_response(timeline: CommitTimeline) -> CommitActivityTimeline:
-    return CommitActivityTimeline(
-        interval_label=timeline.interval_label,
-        total_commits=timeline.total_commits,
-        range_start=timeline.range_start,
-        range_end=timeline.range_end,
-        buckets=[
-            CommitTimelineBucket(
-                period_start=bucket.period_start,
-                commit_count=bucket.commit_count,
-            )
-            for bucket in timeline.buckets
-        ],
-    )
 
 
 # Fetches the default-branch file tree after resolving repo metadata. The
@@ -159,14 +205,9 @@ def get_repo_tree(
     user: AuthenticatedUser | None = Depends(require_user_or_public_demo),
 ) -> RepoTreeResponse:
     try:
-        parsed_repo = parse_github_repo_url(request.repo_url)
-        repo_access.apply_repo_access(user, parsed_repo.owner, parsed_repo.repo)
-        metadata = fetch_repo_metadata(parsed_repo.owner, parsed_repo.repo)
-        tree = fetch_repo_tree(
-            parsed_repo.owner,
-            parsed_repo.repo,
-            metadata.default_branch,
-        )
+        return analysis_service.get_repo_analysis(
+            request.repo_url, user
+        ).value.tree_response()
     except RepoUrlParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except GitHubMetadataError as exc:
@@ -174,24 +215,8 @@ def get_repo_tree(
     except GitHubTreeError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    return RepoTreeResponse(
-        owner=parsed_repo.owner,
-        repo=parsed_repo.repo,
-        normalized_url=parsed_repo.normalized_url,
-        default_branch=metadata.default_branch,
-        files=[
-            RepoFile(
-                path=file.path,
-                type=file.type,
-                size=file.size,
-                url=file.url,
-            )
-            for file in tree.files
-        ],
-        total_files=tree.total_files,
-        total_directories=tree.total_directories,
-        is_truncated=tree.is_truncated,
-    )
+    except GitHubFileContentError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
 # Fetches the default-branch tree and returns deterministic Phase 5 file
@@ -203,14 +228,9 @@ def get_ranked_repo_files(
     user: AuthenticatedUser | None = Depends(require_user_or_public_demo),
 ) -> RepoFileRankingResponse:
     try:
-        parsed_repo = parse_github_repo_url(request.repo_url)
-        repo_access.apply_repo_access(user, parsed_repo.owner, parsed_repo.repo)
-        metadata = fetch_repo_metadata(parsed_repo.owner, parsed_repo.repo)
-        tree = fetch_repo_tree(
-            parsed_repo.owner,
-            parsed_repo.repo,
-            metadata.default_branch,
-        )
+        return analysis_service.get_repo_analysis(
+            request.repo_url, user
+        ).value.ranking_response()
     except RepoUrlParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except GitHubMetadataError as exc:
@@ -218,27 +238,8 @@ def get_ranked_repo_files(
     except GitHubTreeError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    rankable_files = filter_repo_files(tree.files)
-    ranked_files = rank_important_files(tree.files)
-
-    return RepoFileRankingResponse(
-        owner=parsed_repo.owner,
-        repo=parsed_repo.repo,
-        normalized_url=parsed_repo.normalized_url,
-        default_branch=metadata.default_branch,
-        ranked_files=[
-            RankedRepoFile(
-                path=file.path,
-                size=file.size,
-                importance_score=file.importance_score,
-                reasons=file.reasons,
-            )
-            for file in ranked_files
-        ],
-        total_files=tree.total_files,
-        rankable_files=len(rankable_files),
-        returned_files=len(ranked_files),
-    )
+    except GitHubFileContentError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
 # Reuses Phase 5 ranked files to detect the repository stack. Phase 6 reads only
@@ -250,26 +251,9 @@ def get_repo_tech_stack(
     user: AuthenticatedUser | None = Depends(require_user_or_public_demo),
 ) -> TechStackResponse:
     try:
-        parsed_repo = parse_github_repo_url(request.repo_url)
-        repo_access.apply_repo_access(user, parsed_repo.owner, parsed_repo.repo)
-        metadata = fetch_repo_metadata(parsed_repo.owner, parsed_repo.repo)
-        tree = fetch_repo_tree(
-            parsed_repo.owner,
-            parsed_repo.repo,
-            metadata.default_branch,
-        )
-        ranked_files = rank_important_files(tree.files)
-        # Fetches the bounded README/manifest set and tolerates per-file gaps;
-        # the service owns the fetch-and-skip logic so this route stays thin.
-        file_contents = collect_stack_evidence(
-            parsed_repo.owner,
-            parsed_repo.repo,
-            metadata.default_branch,
-            ranked_files,
-        )
-        # The full per-language byte breakdown (best-effort: {} on failure) so the
-        # detected stack reflects every meaningful language, not just the top one.
-        languages = fetch_repo_languages(parsed_repo.owner, parsed_repo.repo)
+        return analysis_service.get_repo_analysis(
+            request.repo_url, user
+        ).value.tech_stack_response()
     except RepoUrlParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except GitHubMetadataError as exc:
@@ -279,31 +263,6 @@ def get_repo_tech_stack(
     except GitHubFileContentError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    technologies = detect_tech_stack(metadata, ranked_files, file_contents, languages)
-
-    return TechStackResponse(
-        owner=parsed_repo.owner,
-        repo=parsed_repo.repo,
-        normalized_url=parsed_repo.normalized_url,
-        default_branch=metadata.default_branch,
-        technologies=[
-            DetectedTechnology(
-                name=technology.name,
-                category=technology.category,
-                confidence=technology.confidence,
-                evidence=[
-                    TechStackEvidence(
-                        source=evidence.source,
-                        detail=evidence.detail,
-                        path=evidence.path,
-                    )
-                    for evidence in technology.evidence
-                ],
-            )
-            for technology in technologies
-        ],
-        evidence_files_read=len(file_contents),
-    )
 
 
 # Reuses Phase 5 rankings to fetch bounded README, config, and top source file
@@ -316,21 +275,20 @@ def get_repo_file_contents(
     user: AuthenticatedUser | None = Depends(require_user_or_public_demo),
 ) -> RepoFileContentResponse:
     try:
-        parsed_repo = parse_github_repo_url(request.repo_url)
-        repo_access.apply_repo_access(user, parsed_repo.owner, parsed_repo.repo)
-        metadata = fetch_repo_metadata(parsed_repo.owner, parsed_repo.repo)
-        tree = fetch_repo_tree(
-            parsed_repo.owner,
-            parsed_repo.repo,
-            metadata.default_branch,
-        )
-        ranked_files = rank_important_files(tree.files)
-        evidence = collect_file_evidence(
-            parsed_repo.owner,
-            parsed_repo.repo,
-            metadata.default_branch,
-            ranked_files,
-        )
+        snapshot = analysis_service.get_repo_analysis(request.repo_url, user).value
+        parsed_repo = snapshot.parsed_repo
+        metadata = snapshot.metadata
+        session = requests.Session()
+        try:
+            evidence = collect_file_evidence(
+                parsed_repo.owner,
+                parsed_repo.repo,
+                metadata.default_branch,
+                snapshot.ranked_files,
+                fetcher=lambda *args: fetch_repo_text_file(*args, session=session),
+            )
+        finally:
+            session.close()
     except RepoUrlParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except GitHubMetadataError as exc:

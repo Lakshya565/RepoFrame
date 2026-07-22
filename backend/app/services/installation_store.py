@@ -6,8 +6,8 @@ from app.services import supabase_client
 # Storage for the Supabase-user ↔ GitHub-App-installation mapping (Phase 15.4).
 # This is the ONLY thing RepoFrame persists about repo access: a non-secret
 # installation_id, the GitHub account it belongs to (for the ownership check), and
-# the repo-selection scope. No token is ever stored — installation tokens are
-# minted per request (github_app.py) and discarded.
+# the repo-selection scope. No token is persisted; short-lived tokens may only be
+# retained in backend process memory until shortly before expiry.
 #
 # Same shape as project_store: a Protocol with an in-memory fake (tests) and a
 # Supabase implementation (production). The table is service-role-only (RLS denies

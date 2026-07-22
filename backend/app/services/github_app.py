@@ -17,9 +17,9 @@ from app import config
 # PHASE_15_PLAN.md §2. Key properties:
 #   * The App private key signs ~9-minute "app JWTs" (RS256). It is backend-only,
 #     read from env (inline or a .pem path), never logged or returned.
-#   * Installation tokens are minted per request and returned to the caller to use
-#     immediately; NOTHING is stored here (the store only keeps the non-secret
-#     installation_id → user mapping).
+#   * Installation tokens stay backend-only. repo_access may retain them in process
+#     memory until shortly before expiry; they are never persisted or returned to
+#     the browser.
 #   * Every network call takes an injectable `request` function, so the whole
 #     module is tested offline against a fake — no real GitHub, zero tokens.
 
@@ -195,8 +195,8 @@ def mint_installation_token(
 ) -> InstallationToken:
     """Mint a fresh ~1h installation token for one installation.
 
-    The token is returned for immediate use and never stored. Raises GitHubAppError
-    on failure.
+    The token is returned to backend access resolution and may be cached in process
+    memory until shortly before expiry. Raises GitHubAppError on failure.
     """
     status, body = request(
         "POST",

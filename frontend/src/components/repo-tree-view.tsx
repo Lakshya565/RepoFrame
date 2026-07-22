@@ -1,15 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { Star } from "lucide-react";
 
-import {
-  fetchRankedRepoFiles,
-  fetchRepoTree,
-  type RepoTreeResponse,
-} from "@/lib/repo-api";
-import { demoFetchRankedFiles, demoFetchRepoTree } from "@/lib/demo-analysis";
-import { useDemo } from "@/lib/demo-mode";
+import { useRepoAnalysis } from "@/lib/analysis-context";
 import { buildRepoTree, type RepoTreeNode } from "@/lib/repo-tree";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,13 +16,9 @@ type RepoTreeViewProps = {
 
 const numberFormatter = new Intl.NumberFormat("en-US");
 
-// Renders our backend tree nodes as Magic UI Folder/File rows. Folders are
-// tinted brand green (the trigger's `text-brand` flows into the icon + label via
-// currentColor) and carry a muted file-count badge. Files that RepoFrame actually
-// read (their path is in `importantPaths`) keep the normal file icon and white
-// color but get a small filled star after their name plus a slightly heavier
-// label, so they stand out without looking like an expandable folder. buildRepoTree
-// already sorts folders-first then alphabetically.
+// Creates only the currently requested level. Folder descendants are supplied as
+// a render function, so the file-tree primitive materializes them on expansion
+// instead of building the entire repository DOM while every folder is collapsed.
 function renderNodes(
   nodes: RepoTreeNode[],
   importantPaths: ReadonlySet<string>,
@@ -49,7 +39,7 @@ function renderNodes(
             </span>
           }
         >
-          {renderNodes(node.children, importantPaths)}
+          {() => renderNodes(node.children, importantPaths)}
         </Folder>
       );
     }
@@ -78,118 +68,25 @@ function renderNodes(
   });
 }
 
-// Fetches GitHub's repository structure and renders it as a Magic UI file tree:
-// an accordion-style browser with folder/file icons and a vertical guide line.
-// It intentionally works only with paths/types from the tree API, not file
-// contents, so Phase 4 stays focused on structure. Expansion state is owned by
-// the Tree component itself; we only feed it the converted elements.
+// Renders the structure and file highlights already delivered by the shared core
+// analysis stream. This component performs no repository requests of its own.
 export function RepoTreeView({ repoUrl }: RepoTreeViewProps) {
-  // In the signed-out demo, the tree + ranked files are served from a frozen
-  // snapshot (demo-analysis.ts) instead of the backend, so /demo makes no request.
-  const demo = useDemo();
-  const [tree, setTree] = useState<RepoTreeResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  // Paths of the files RepoFrame ranked as important, used only to star them in
-  // the tree. This is a separate, best-effort fetch from the same deterministic
-  // Phase 5 ranking the "Files we read" section shows; if it fails the tree still
-  // renders, just without highlights.
-  const [importantPaths, setImportantPaths] = useState<ReadonlySet<string>>(
-    () => new Set(),
+  const { tree: treeResource, ranking } = useRepoAnalysis();
+  const { data: tree, error, isLoading, reload } = treeResource;
+  const importantPaths = useMemo<ReadonlySet<string>>(
+    () => new Set(ranking.data?.rankedFiles.map((file) => file.path) ?? []),
+    [ranking.data],
   );
 
-  // Reloads the file tree for the retry button.
-  const loadTree = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
+  const treeRoot = useMemo(
+    () => (tree ? buildRepoTree(tree.files) : null),
+    [tree],
+  );
 
-    try {
-      const repoTree = await (demo ? demoFetchRepoTree() : fetchRepoTree(repoUrl));
-      setTree(repoTree);
-    } catch (error) {
-      setTree(null);
-      setError(
-        error instanceof Error
-          ? error.message
-          : "RepoFrame could not fetch the repository file tree.",
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  }, [repoUrl, demo]);
-
-  // Runs the initial tree fetch for the current repo URL and ignores stale
-  // responses if the page changes before GitHub responds.
   useEffect(() => {
-    let isCurrentRequest = true;
-
-    async function run() {
-      setIsLoading(true);
-      setError(null);
-
-      try {
-        const repoTree = await (demo
-          ? demoFetchRepoTree()
-          : fetchRepoTree(repoUrl));
-        if (isCurrentRequest) {
-          setTree(repoTree);
-        }
-      } catch (error) {
-        if (isCurrentRequest) {
-          setTree(null);
-          setError(
-            error instanceof Error
-              ? error.message
-              : "RepoFrame could not fetch the repository file tree.",
-          );
-        }
-      } finally {
-        if (isCurrentRequest) {
-          setIsLoading(false);
-        }
-      }
+    if (tree) {
+      performance.mark("repoframe-analysis-tree-interactive");
     }
-
-    run();
-
-    return () => {
-      isCurrentRequest = false;
-    };
-  }, [repoUrl, demo]);
-
-  // Best-effort fetch of the ranked-file paths so they can be starred in the tree.
-  // Independent of the tree fetch and silent on failure — highlights are purely
-  // decorative, so a ranking error should never block the structure view.
-  useEffect(() => {
-    let isCurrentRequest = true;
-
-    (demo ? demoFetchRankedFiles() : fetchRankedRepoFiles(repoUrl))
-      .then((ranking) => {
-        if (isCurrentRequest) {
-          setImportantPaths(
-            new Set(ranking.rankedFiles.map((file) => file.path)),
-          );
-        }
-      })
-      .catch(() => {
-        if (isCurrentRequest) {
-          setImportantPaths(new Set());
-        }
-      });
-
-    return () => {
-      isCurrentRequest = false;
-    };
-  }, [repoUrl, demo]);
-
-  // Converts GitHub's flat list of file paths into nested nodes only when the
-  // backend response changes, so render stays cheap.
-  const treeRoot = useMemo(() => {
-    if (!tree) {
-      return null;
-    }
-
-    return buildRepoTree(tree.files);
   }, [tree]);
 
   if (isLoading) {
@@ -210,7 +107,7 @@ export function RepoTreeView({ repoUrl }: RepoTreeViewProps) {
       <ErrorState
         title="File tree unavailable"
         message={error}
-        onRetry={loadTree}
+        onRetry={reload}
       />
     );
   }
@@ -256,8 +153,6 @@ export function RepoTreeView({ repoUrl }: RepoTreeViewProps) {
 
       <div className="mt-5 h-96 rounded-md border bg-muted/40 py-3">
         {treeRoot && treeRoot.children.length > 0 ? (
-          // No initialExpandedItems → the tree opens fully collapsed.
-          // Re-key on the repo URL so a fresh repo resets expansion state.
           <Tree key={repoUrl} className="text-foreground">
             {renderNodes(treeRoot.children, importantPaths)}
           </Tree>

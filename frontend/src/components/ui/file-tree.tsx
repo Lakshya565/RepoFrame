@@ -310,12 +310,13 @@ type FolderProps = {
   element: React.ReactNode
   isSelectable?: boolean
   isSelect?: boolean
-} & React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Item>
+  children?: React.ReactNode | (() => React.ReactNode)
+} & Omit<
+  React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Item>,
+  "children"
+>
 
-const Folder = forwardRef<
-  HTMLDivElement,
-  FolderProps & React.HTMLAttributes<HTMLDivElement>
->(
+const Folder = forwardRef<HTMLDivElement, FolderProps>(
   (
     {
       className,
@@ -339,6 +340,13 @@ const Folder = forwardRef<
       closeIcon,
     } = useTree()
     const isSelected = isSelect ?? selectedId === value
+    const isExpanded = expandedItems?.includes(value) ?? false
+    const renderedChildren =
+      typeof children === "function"
+        ? isExpanded
+          ? children()
+          : null
+        : children
 
     return (
       <AccordionPrimitive.Item
@@ -376,7 +384,7 @@ const Folder = forwardRef<
             className="ml-5 flex flex-col gap-1 py-1 rtl:mr-5"
             value={expandedItems}
           >
-            {children}
+            {renderedChildren}
           </AccordionPrimitive.Root>
         </AccordionPrimitive.Content>
       </AccordionPrimitive.Item>
