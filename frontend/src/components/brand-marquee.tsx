@@ -30,10 +30,8 @@ const RAIL_WIDTH = "6.5rem";
 // dissolve in and out of view (a soft mask, not a hard cut).
 const PORTAL_FADE = "10rem";
 
-// PHASE TOGGLE. Phase 1 (current): false → every logo renders in its real brand
-// color. Phase 2 (after the user approves phase 1): set true to recolor every
-// logo with the RepoFrame brand green. Because each logo is a single-color path,
-// this one flag is the only change needed — see marquee-icons.ts.
+// Keep the decorative logos aligned with RepoFrame's visual system instead of
+// mixing the source brands' unrelated colors into the page.
 const USE_BRAND_GREEN = true;
 
 // Resolves the fill color for a logo under the current phase.

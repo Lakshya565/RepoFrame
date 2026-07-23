@@ -16,9 +16,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/states";
 
 // The saved-projects list, shared by the History tab and the /saved page. Lists
-// the signed-in user's saved analyses (newest first) with open + delete. Gated by
-// the caller behind NEXT_PUBLIC_SHOW_SAVED; here it only worries about auth state
-// and the fetch lifecycle (loading / error / empty / list).
+// the signed-in user's saved analyses (newest first) with open + delete. It owns
+// the auth-aware fetch lifecycle: loading, error, empty, and populated states.
 
 const LIST_ERROR = "RepoFrame could not load your saved projects.";
 

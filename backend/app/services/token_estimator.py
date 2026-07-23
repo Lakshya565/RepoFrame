@@ -5,13 +5,9 @@ from app.config import MAX_TOTAL_PROMPT_CHARS
 # (rounding down char count = more tokens predicted) so budget checks err
 # on the conservative side.
 #
-# Phase 10 integration note: replace this with tiktoken and the encoder that
-# matches whichever model is selected, so the pre-call estimate is exact.
-# This pre-call check is separate from the post-call usage object returned by
-# the OpenAI API (prompt_tokens, completion_tokens, reasoning_tokens, etc.),
-# which Phase 13 will use for actual cost tracking. The function signatures
-# below are stable so swapping in tiktoken is a one-line change inside
-# estimate_input_tokens.
+# This conservative pre-call estimate is separate from the exact post-call usage
+# reported by OpenAI and persisted by usage_store. The character budget remains
+# the hard safety boundary even if model tokenization changes.
 
 _CHARS_PER_TOKEN = 4
 
@@ -30,9 +26,8 @@ def check_prompt_budget(
     before an OpenAI call. Repository evidence is fitted automatically upstream;
     this final guard catches oversized non-evidence context and programming errors.
 
-    Phase 10 integration note: call this at the start of the prompt-generation
-    service, before constructing the final prompt string, so oversized payloads
-    are rejected before they reach the OpenAI client.
+    Callers run this final guard immediately before an OpenAI request so oversized
+    non-evidence context is rejected without spending tokens.
     """
     if total_chars <= max_chars:
         return True, ""

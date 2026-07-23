@@ -1,224 +1,241 @@
 # RepoFrame
 
-Frame your project around what you actually built. RepoFrame is a full-stack developer tool that turns GitHub repositories into clear, evidence-backed project writeups.
+RepoFrame turns GitHub repositories into evidence-backed project writeups. It
+combines deterministic repository analysis with user-provided context, then generates
+resume bullets, README copy, portfolio content, LinkedIn descriptions, and interview
+preparation. An optional Agentic Audit investigates whether generated claims are
+actually supported.
 
-The app will analyze a repository's structure and technical signals, ask the user for project context, and generate resume bullets, README sections, portfolio blurbs, and interview talking points grounded in actual repository evidence.
-
-## Tech Stack
-
-- Frontend: Next.js, TypeScript, Tailwind CSS
-- Backend: FastAPI, Python, Pydantic
-- Planned integrations: GitHub REST API, OpenAI API, Supabase/Postgres
-
-## Project Structure
+## How it works
 
 ```text
-RepoFrame/
-  frontend/   Next.js app
-  backend/    FastAPI app
+GitHub URL
+   |
+   v
+Metadata + tree + languages
+   |
+   v
+Deterministic filtering, ranking, and stack detection
+   |
+   v
+Bounded README/config/source evidence + user context
+   |
+   v
+Structured project profile (OpenAI)
+   |
+   +--> Resume / README / portfolio / LinkedIn outputs
+   +--> Interview preparation
+   +--> Optional Evidence Investigator audit
 ```
 
-Current frontend structure:
+Repository evidence supports technical claims. User context supports facts that code
+cannot prove, such as ownership, project purpose, team role, and measurable impact.
+
+## Stack
+
+- Frontend: Next.js 16, React 19, TypeScript, Tailwind CSS, Motion, Recharts
+- Backend: FastAPI, Python, Pydantic, Requests
+- Generation: OpenAI `gpt-5.6-luna`
+- Repository access: GitHub REST API and GitHub App installation tokens
+- Auth and persistence: Supabase Auth and PostgreSQL
+- Hosting: Vercel frontend, Render backend, Supabase data/auth
+
+## Architecture
 
 ```text
 frontend/
-  public/
-  src/app/
-    page.tsx                      Landing page with the repo URL form
-    analysis/page.tsx             Analysis page that composes the cards below
-  src/components/
-    repo-url-form.tsx             Repo URL entry and submission
-    repo-summary-card.tsx         GitHub metadata summary
-    tech-stack-card.tsx           Detected tech stack with evidence
-    important-files-card.tsx      Ranked important files
-    repo-tree-view.tsx            Expandable file tree
-    user-context-form.tsx         Phase 9: user context questionnaire
-    project-writeup-section.tsx   Phase 11/12: orchestrates generation and verification
-    generated-outputs-card.tsx    Phase 11: tabbed outputs (resume/README/etc. + interview)
-    evidence-panel.tsx            Phase 11: claim-to-source links for the profile
-    claim-verification-panel.tsx  Phase 12: per-claim verification status display
-  src/lib/
-    repo-api.ts                   Typed client for every backend endpoint
-    repo-tree.ts                  Builds the nested tree from GitHub's flat path list
-    user-context.ts               Phase 9: questionnaire data shapes and field metadata
-    outputs.ts                    Phase 11: shared output section <-> text helpers
-  package.json
-  tsconfig.json
-```
+  src/app/             Routes and layouts
+  src/components/      Product and UI components
+  src/lib/             Typed clients, providers, state, and transformations
+  tests/               Focused network-boundary transformation tests
 
-Current backend structure:
-
-```text
 backend/
-  app/
-    main.py
-    config.py          ← Phase 8: centralized limits, API key, rate-limit placeholders
-    routers/
-    schemas/
-    services/
-      token_estimator.py  ← Phase 8: prompt budget check and token estimation
-      llm_client.py         ← Phase 11/12: shared OpenAI client (single-shot + tool-calling), usage capture
-      profile_generator.py  ← Phase 10: prompt construction + OpenAI profile generation
-      output_generator.py   ← Phase 11: core output + interview-prep generation
-      claim_verifier.py     ← bounded Luna loop, verdict parsing, investigation accounting
-      evidence_investigator.py ← request-scoped repository index + safe on-demand reads
-      usage_store.py        ← Phase 12: persistent lifetime token ledger (JSON stopgap)
-      prompt_format.py      ← shared prompt formatting (user context, evidence excerpts)
-      prompt_budget.py      ← request-aware evidence fitting before OpenAI calls
-      metrics_store.py      ← Phase 13: in-memory operational + claim-quality metrics
-      analysis_service.py   ← progressive repo pipeline, SWR caches, and single-flight work
-  data/                ← Phase 12: usage.json ledger (git-ignored, local state)
-  requirements.txt
+  app/routers/         Thin FastAPI HTTP/SSE adapters
+  app/schemas/         Pydantic request and response contracts
+  app/services/        GitHub, analysis, evidence, generation, auth, and storage logic
+  tests/               Offline unit and integration tests
+
+supabase/
+  migrations/          Project and usage persistence schema
 ```
 
-## Local Development
+Important service boundaries:
 
-### Frontend
+- `analysis_service.py` coordinates the shared repository snapshot and caches.
+- `github_service.py` owns GitHub HTTP behavior, ETags, errors, and timeouts.
+- `file_ranker.py`, `tech_stack_detector.py`, and `file_content_service.py` own
+  deterministic repository understanding.
+- `profile_generator.py` and `output_generator.py` build model requests.
+- `evidence_investigator.py` exposes safe read-only repository tools.
+- `claim_verifier.py` runs the bounded investigation and structured verdict.
+- `prompt_budget.py` fits evidence to the complete rendered request.
+- `usage_store.py`, `rate_limit.py`, and `metrics_store.py` track and bound work.
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+See [PHASES.md](PHASES.md) for the implementation history and
+[REPOFRAME_INTERVIEW_GUIDE.md](REPOFRAME_INTERVIEW_GUIDE.md) for a conversational
+architecture walkthrough.
 
-The frontend runs on the port printed by Next.js, usually `http://localhost:3000`.
+## Local setup
 
 ### Backend
 
 ```powershell
 cd backend
 python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-The backend runs at `http://127.0.0.1:8000`. Check `GET /health` to confirm it is running.
+`backend/.env` is git-ignored. Never place backend secrets in the frontend.
 
-Local backend secrets live in `backend/.env`, which is ignored by Git. Copy `backend/.env.example` as a starting point. `GITHUB_TOKEN` is optional; without it RepoFrame uses GitHub's unauthenticated public API rate limit. `OPENAI_API_KEY` will be required from Phase 10 onward and must only ever appear in the backend `.env` — it is never passed to the frontend.
+Key backend settings:
 
-The frontend uses `NEXT_PUBLIC_API_BASE_URL` when set, otherwise it calls `http://127.0.0.1:8000`.
+| Variable | Purpose |
+| --- | --- |
+| `GITHUB_TOKEN` | Optional higher public GitHub API rate limit |
+| `OPENAI_API_KEY` | Required for generation and Agentic Audit |
+| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Backend-only database credential |
+| `GITHUB_APP_ID` | GitHub App identity |
+| `GITHUB_APP_PRIVATE_KEY` or `GITHUB_APP_PRIVATE_KEY_PATH` | Signs App JWTs |
+| `GITHUB_APP_WEBHOOK_SECRET` | Verifies installation webhooks |
+| `CORS_ALLOW_ORIGINS` | Comma-separated allowed frontend origins |
+| `MAX_LLM_CALLS_PER_USER_PER_DAY` | Per-user paid-call quota |
+| `MAX_LLM_CALLS_PER_DAY` | Global paid-call quota |
 
-Run backend tests with:
+The complete safe template is `backend/.env.example`.
+
+### Frontend
+
+```powershell
+cd frontend
+npm.cmd install
+npm.cmd run dev
+```
+
+Create `frontend/.env.local` when using hosted auth/backend services:
+
+```dotenv
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+NEXT_PUBLIC_GITHUB_APP_SLUG=
+```
+
+These four values are intentionally browser-visible. OpenAI, Supabase service-role,
+GitHub App private-key, and webhook secrets are backend-only.
+
+If Supabase is not configured, RepoFrame keeps a public-repository local-development
+flow and uses a git-ignored local token ledger. When Supabase is configured,
+authentication, saved projects, private-repository access, persistent usage, and paid
+call quotas become active.
+
+## API overview
+
+### Repository analysis
+
+- `GET /health`
+- `POST /api/repo/parse`
+- `POST /api/repo/analysis/stream`
+- `POST /api/repo/metadata`
+- `POST /api/repo/tree`
+- `POST /api/repo/ranked-files`
+- `POST /api/repo/tech-stack`
+- `POST /api/repo/file-contents`
+- `POST /api/repo/commit-activity`
+- `GET /api/github/rate-limit`
+
+The Analysis page normally uses one progressive core stream, then starts commit
+activity after the core analysis completes. The older JSON endpoints remain useful
+individually and provide a deployment-skew fallback if a new frontend briefly reaches
+an older backend.
+
+### Generation and audit
+
+- `POST /api/generate/profile`
+- `POST /api/generate/outputs`
+- `POST /api/generate/outputs/revise`
+- `POST /api/generate/interview-prep`
+- `POST /api/generate/interview-prep/revise`
+- `POST /api/generate/verify`
+- `POST /api/generate/verify/stream`
+
+These routes call OpenAI only after an explicit user action. All use the shared Luna
+client, rendered-request budget checks, timeouts, retries, structured validation, and
+usage recording.
+
+### Persistence and operations
+
+- `GET/POST /api/projects`
+- `GET/DELETE /api/projects/{project_id}`
+- `POST /api/github/install`
+- `POST /api/github/webhook`
+- `GET /api/usage/total`
+- `GET /api/metrics`
+
+Project and GitHub App routes are scoped by the verified Supabase identity. Backend
+usage and metrics remain available even though no developer metrics panel is shown in
+the product UI.
+
+## Performance and reliability
+
+- Core analysis streams metadata, structure/ranking, and tech stack as each stage is ready.
+- Backend caches are bounded LRUs with five-minute freshness, thirty-minute
+  stale-while-revalidate behavior, and single-flight request deduplication.
+- Public and private repositories use different cache scopes.
+- GitHub ETags avoid downloading unchanged resources.
+- GitHub App tokens stay in memory and expire before GitHub's reported deadline.
+- Frontend session caches hold at most ten repositories and clear private data on sign-out.
+- Commit statistics are deferred, retried when GitHub is still computing, and cached.
+- The repository tree lazy-mounts and renders only expanded branches.
+- The commit chart is dynamically imported.
+- Each analysis card has independent loading/error behavior so one failure cannot take
+  down the route.
+
+## Validation
+
+Offline checks:
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m unittest discover -s tests
+.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider
+.\.venv\Scripts\python.exe -m pip check
+
+cd ..\frontend
+npm.cmd test
+npm.cmd run lint
+npm.cmd run build
+
+cd ..
+git diff --check
 ```
 
-(Or `python -m pytest` after `pip install -r requirements-dev.txt`.)
+Tests use fake GitHub/OpenAI/Supabase boundaries and do not spend tokens. A production
+smoke test is separate because repository tests cannot prove hosted environment values,
+OAuth dashboard settings, webhook activation, or external service availability.
 
 ## Deployment
 
-RepoFrame deploys as three pieces: the **frontend** on Vercel, the **backend** on a
-container/VM host (Render, Fly.io, or Railway), and **Supabase** for auth + persistence.
-
-**Golden rule:** only the two `NEXT_PUBLIC_*` values (Supabase URL + publishable/anon key)
-and `NEXT_PUBLIC_GITHUB_APP_SLUG` may live in the frontend. Every other secret —
-`OPENAI_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `GITHUB_APP_PRIVATE_KEY`,
-`GITHUB_APP_WEBHOOK_SECRET` — is backend-only and must never reach the browser bundle.
-
-### Backend (Render / Fly.io / Railway)
+### Backend
 
 - Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
 - Health check: `GET /health`
-- Set every value from `backend/.env.example` in the host's env (secrets included).
-- `CORS_ALLOW_ORIGINS` → your deployed frontend origin(s), comma-separated
-  (e.g. `https://repoframe.vercel.app`). Defaults to localhost, so this MUST be set.
-- Spend caps (`MAX_LLM_CALLS_PER_USER_PER_DAY`, `MAX_LLM_CALLS_PER_DAY`) are enforced
-  once Supabase is configured; tune them for your launch.
+- Set `CORS_ALLOW_ORIGINS` to the deployed frontend origin.
+- Configure all backend-only secrets from `backend/.env.example`.
+- Apply every migration in `supabase/migrations/`.
 
-### Frontend (Vercel)
+### Frontend
 
-- `NEXT_PUBLIC_API_BASE_URL` → the deployed backend URL.
-- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
-  `NEXT_PUBLIC_GITHUB_APP_SLUG` → the production values.
-- `NEXT_PUBLIC_SHOW_SAVED=true` to expose the saved-projects / History surfaces.
+- Set `NEXT_PUBLIC_API_BASE_URL` to the deployed backend.
+- Set the public Supabase URL/key and GitHub App slug.
+- Deploy the `frontend` directory to Vercel.
 
-### Supabase + GitHub (dashboard config)
+### External dashboard checks
 
-- Run the migration in `supabase/migrations/` against the production project.
-- **Auth → URL Configuration:** Site URL = your frontend origin; Redirect URLs must
-  include `https://<frontend>/**`.
-- **GitHub OAuth App** (identity, wired into Supabase): keep the client id/secret current
-  in Supabase → Providers → GitHub. A stale secret surfaces as
-  `Unable to exchange external code` at login.
-- **GitHub App** (repo access): set the Webhook URL to `https://<backend>/api/github/webhook`
-  (with `GITHUB_APP_WEBHOOK_SECRET`) and the Setup URL to `https://<frontend>/github/installed`.
-
-### Post-deploy smoke
-
-Health check green → signed-out demo loads → GitHub login round-trips on the production
-origin → a signed-in analyze → generate → verify → save → reopen works → a private-repo
-analyze works with the App installed → spend caps return a friendly 429 when hit.
-
-## MVP Goals
-
-- Accept a GitHub repository URL from the user.
-- Extract repository structure and identify important files.
-- Detect technical evidence such as languages, frameworks, dependencies, and notable implementation details.
-- Ask the user for missing project context.
-- Generate evidence-backed resume bullets, README sections, portfolio blurbs, and interview talking points.
-
-## Current Scope
-
-Phases 1 through 13 are implemented. The app has a landing page with a GitHub repository URL input, loading and error states, and an analysis page driven by a FastAPI backend. The backend currently exposes:
-
-- `GET /health` — service health check.
-- `POST /api/repo/parse` — normalize a GitHub URL into owner/repo.
-- `POST /api/repo/analysis/stream` — progressively return metadata, structure/ranking, and tech-stack events from one shared repository analysis.
-- `POST /api/repo/metadata` — fetch public repository metadata.
-- `POST /api/repo/commit-activity` — fetch GitHub's last-year statistics once and return bundled 1M/1Y timelines.
-- `POST /api/repo/tree` — fetch the default-branch file tree.
-- `POST /api/repo/ranked-files` — deterministic filtering and ranking of important files.
-- `POST /api/repo/tech-stack` — detect technologies with evidence and confidence.
-- `POST /api/repo/file-contents` — fetch bounded README, config, and top source file excerpts.
-- `POST /api/generate/profile` — generate a structured, evidence-backed project profile via OpenAI.
-- `POST /api/generate/outputs` — generate core written outputs (resume bullets, README intro, portfolio blurb, LinkedIn description) from a project profile; an optional `sections` list scopes generation to one section (used for per-tab generation).
-- `POST /api/generate/outputs/revise` — feedback-driven regenerate of one section: revises the user's current draft using their edits plus an optional (length-capped) instruction, kept the same length/format.
-- `POST /api/generate/interview-prep` — generate interview talking points from a project profile (opt-in only).
-- `POST /api/generate/verify` — run the bounded agentic claim-verification workflow over generated outputs (opt-in only).
-- `GET /api/github/rate-limit` — report the current GitHub REST API budget.
-- `GET /api/usage/total` — report the persistent lifetime OpenAI token totals recorded by the backend.
-- `GET /api/metrics` — report operational and claim-quality metrics (repos analyzed, files scanned/selected, outputs generated, claim verification counts by status, request/error counts, LLM/backend latency).
-
-The Analysis tab uses the progressive stream for its core cards, then starts the
-separate commit-statistics request after the core data settles. Core analysis and
-commit activity use bounded process-memory caches with five-minute freshness,
-thirty-minute stale-while-revalidate service, single-flight request deduplication,
-and GitHub ETag revalidation. Private cache keys include the authenticated user and
-installation; tokens remain process-memory-only and expire before GitHub's deadline.
-
-Phase 7 file-content fetching is intentionally bounded: it selects README, dependency/config manifests, and the top-ranked source files, then enforces a maximum number of files, a per-file character limit, and a total character limit across all excerpts. Files that are missing, oversized, non-text, or beyond the limits are returned as skipped with a clear reason, so the evidence stays small and auditable.
-
-Before generation or Agentic Audit calls, RepoFrame measures the complete rendered request—including instructions, user context, generated outputs, formatting, serialization, and tool schemas—and automatically refits only the GitHub evidence to the remaining prompt capacity. Higher-ranked files stay first, the final fitting excerpt is marked truncated, and lower-priority files receive an explicit prompt-budget skip reason. Investigator tool results are likewise shortened to the conversation's remaining headroom, while the final hard budget check still rejects oversized user/generated context before any paid request.
-
-Phase 8 added token, cost, and abuse protection in preparation for OpenAI integration:
-
-- All safety limits (`MAX_SELECTED_FILES`, `MAX_CHARS_PER_FILE`, `MAX_TOTAL_PROMPT_CHARS`, `MAX_FILE_SIZE_BYTES`) are now centralized in `app/config.py` and readable from environment variables.
-- `OPENAI_API_KEY` is read from the backend environment only and is never exposed to the frontend.
-- `app/services/token_estimator.py` provides `estimate_input_tokens()` and `check_prompt_budget()` for validating complete request context before any OpenAI call.
-- Per-session, per-IP, and global daily analysis caps are defined in config with placeholder comments marking where Phase 16 rate-limiting middleware should be wired in.
-- An optional `ACCESS_PASSWORD` gate is available in config for early controlled deployments.
-
-Phase 9 added a user context questionnaire on the analysis page. It collects the project facts the repository cannot reveal — purpose, solo/team status, the user's own contribution, target user or client, hardest technical part, and optional measurable impact. Answers are held in frontend state only (no backend or database persistence yet): the form saves to a read-only summary and can be re-opened for editing. This context grounds the generation phase so RepoFrame does not guess intent, ownership, or impact.
-
-Phase 10 added OpenAI-based project profile generation (backend only). `POST /api/generate/profile` accepts a repo URL and the user-context answers, re-runs the deterministic pipeline (metadata, tree, ranking, tech-stack, bounded file evidence), and asks OpenAI for a validated JSON profile: project name, two-sentence summary, problem, solution, detected tech stack, core features, technical highlights, user contribution, technical challenges, resume angles, and an evidence array linking claims to sources. Cost is bounded on both sides: ranked GitHub excerpts are automatically fitted inside `MAX_TOTAL_PROMPT_CHARS`, the complete request is checked again before any call, and output is bounded by `OPENAI_MAX_OUTPUT_TOKENS`. Every OpenAI-backed feature is pinned in code to `gpt-5.6-luna`; there is deliberately no deployment environment override that can restore an older model. Structured generation and the verifier's tool-free final judgment use `OPENAI_REASONING_EFFORT=medium`, while Luna function-tool turns use `reasoning_effort=none` because Chat Completions rejects that request shape when reasoning is enabled. Temperature is never sent. Because reasoning tokens share the output budget, `OPENAI_MAX_OUTPUT_TOKENS` defaults to 6000 to avoid truncating JSON answers.
-
-The OpenAI client is reused across requests (connection pooling) and built with an explicit `OPENAI_TIMEOUT_SECONDS` (default 60, versus the SDK's 10-minute default) and `OPENAI_MAX_RETRIES` (default 2, using the SDK's exponential backoff). Transport and API errors map to specific HTTP statuses (timeout → 504, rate limit → 429, auth → 500, connection → 503), a response truncated at the token limit returns a clear actionable error, and raw error detail is logged server-side rather than returned to the client. The OpenAI call lives behind an injectable completion function so the unit tests run fully offline with zero token usage. Install dependencies with `pip install -r requirements.txt` to pull in the `openai` package before using this endpoint.
-
-Phase 11 (backend) adds generated outputs on top of a project profile. The shared OpenAI plumbing (client reuse, timeout/retries, reasoning-model handling, budget/truncation guards, error mapping) lives in `app/services/llm_client.py` and is used by every generator. `POST /api/generate/outputs` turns a project profile into resume bullets, a README intro, a portfolio blurb, and a LinkedIn-style description in one call; an optional `sections` list scopes a regenerate to a single section so it never overwrites the others. `POST /api/generate/interview-prep` generates interview talking points and is opt-in only — the frontend calls it solely when the user explicitly asks, so it never spends tokens in the default flow. Both endpoints take the profile in the request body to avoid re-running the repo pipeline or the profile-generation call.
-
-On the frontend, the analysis page's `ProjectWriteupSection` lifts the questionnaire answers and orchestrates generation. Generation is granular: each output tab has its own **Generate** button (one OpenAI call for that section), and a **Generate all** button runs the profile, all four outputs, and interview prep in sequence. Each tab also supports **feedback-driven Regenerate** — edit the text inline and/or type a short instruction, and that section is revised (preserving your edits, kept roughly the same length); the Regenerate button stays disabled until there is an edit or instruction to act on. Nothing generates on page load, so the page never spends tokens without a deliberate click.
-
-Interview prep is a fifth tab alongside the four outputs, with its own generate and copy. Every tab (and a shared one for "Generate all") has an optional **instructions box** folded into the prompt up front, so a result can be steered to spec on the first try instead of regenerating — the per-tab box doubles as the feedback input for Regenerate. The profile is reused across calls only while the questionnaire is unchanged; editing the questionnaire refreshes it on the next call so grounding stays current.
-
-Two efficiency/safety properties: (1) the **profile is generated once and reused** for every per-section, revise, and interview call — the raw repo evidence is never re-sent after that, and because the profile is the stable prompt prefix, OpenAI prompt-caches it across calls; (2) a **global lock** allows only one generation at a time — every trigger is disabled while a call is in flight, so rapid clicks cannot stack up concurrent OpenAI calls. An `EvidencePanel` shows the profile's claim-to-source links once a profile exists, and the first generation is slower because it builds the profile (the UI says so). This part of the UI is intentionally functional rather than polished — the visual overhaul comes in the Phase 14 polish pass.
-
-Phase 12 adds agentic claim verification and token tracking. `POST /api/generate/verify` rebuilds the deterministic initial evidence and a safe index of the known repository tree, then runs the **Evidence Investigator**. The strongest evidence is provided inline, while three read-only tools let Luna search repository paths (`search_repository`), fetch an exact allowlisted text file (`read_repository_file`), and search all accumulated contents (`search_evidence`). Reads are cached and restricted to the authorized repo/ref; traversal, arbitrary URLs, binaries, oversized files, execution, and writes are unavailable. The agent identifies discrete factual claims across every generated tab and labels each `supported`, `partially_supported`, `needs_user_confirmation`, or `unsupported`, retaining user context as evidence for ownership, intent, and impact. Runs are bounded by `VERIFY_MAX_ITERATIONS`, `VERIFY_MAX_TOOL_CALLS`, `VERIFY_MAX_ADDITIONAL_FILES`, `VERIFY_MAX_ADDITIONAL_CHARS`, and the shared prompt budget. The loop reserves its last model call for a tool-free JSON verdict at the configured reasoning effort (`medium` by default); earlier tool-selection turns use Luna with reasoning disabled, the supported Chat Completions request shape. Verification responses include an `investigation` audit with model turns, tool calls, and additional files inspected, which the frontend displays above the findings.
-
-Token tracking captures real prompt, completion, reasoning, and total tokens from OpenAI. The local JSON ledger tracks both user-visible runs and actual model calls; when Supabase is configured, `usage_metrics.model_calls` does the same per user. Daily spend caps sum model calls, so every successful turn of a multi-turn investigation is charged instead of counting the entire verification as one request. Developer token and operational-metrics panels are intentionally absent from the frontend; accounting remains enabled in the backend for spend controls and future product statistics. Apply all migrations in `supabase/migrations/`, including `0002_usage_model_calls.sql`, before deploying this change.
-
-Phase 13 adds operational and claim-quality metrics (the token-usage slice of this phase already shipped in Phase 12). `app/services/metrics_store.py` keeps a lightweight **in-memory** set of cumulative counters (repos analyzed, files scanned, files selected, outputs generated, claims verified and the breakdown by status, request and error counts) and latency aggregates (LLM and backend, as count/average/max). A FastAPI middleware records backend latency, request counts, and server-error (5xx) counts uniformly for every API request; the generation and verification routes record LLM latency and the domain counters. `GET /api/metrics` exposes a snapshot for debugging and project reporting. The store is in-memory by design (high-frequency, resets on restart) — an intentional stopgap, swappable for a Supabase-backed implementation in Phase 15 behind the same record/snapshot interface. No dollar-cost estimate is computed.
-
-Database persistence and authentication are planned but not implemented yet.
+- Supabase Site URL and redirect allowlist include the production frontend.
+- Supabase's GitHub provider has the current OAuth client ID and secret.
+- The GitHub App Setup URL points to `/github/installed`.
+- The GitHub App webhook points to `/api/github/webhook` and uses the configured secret.
+- A signed-in user can analyze, generate, audit, save, reopen, and access an authorized
+  private repository.

@@ -144,8 +144,8 @@ def get_current_user(authorization: str | None) -> AuthenticatedUser | None:
     (which turns None into a 401); callers that allow anonymous access can act on
     the None directly.
 
-    Takes the raw header value (not a Request) so it is trivially unit-testable
-    and reusable by non-FastAPI callers (e.g. the Phase 17 MCP adapter).
+    Takes the raw header value (not a Request) so it stays unit-testable and can
+    be reused by service-layer callers.
     """
     token = _extract_bearer_token(authorization)
     if token is None:

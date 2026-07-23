@@ -1,10 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import {
-  combineLegacyCommitActivity,
-  parseCommitActivityPayload,
-} from "../src/lib/commit-activity.ts";
+import { parseCommitActivityPayload } from "../src/lib/commit-activity.ts";
 
 const timeline = {
   intervalLabel: "1 day",
@@ -28,31 +25,23 @@ test("accepts the bundled month and year response", () => {
     ...identity,
     ranges: { month: timeline, year: timeline },
   });
-  assert.equal(parsed.kind, "bundled");
-  if (parsed.kind === "bundled") {
-    assert.equal(parsed.data.ranges.month.totalCommits, 2);
-  }
-});
-
-test("normalizes two legacy single-range responses", () => {
-  const year = parseCommitActivityPayload({ ...identity, range: "year", ...timeline });
-  const month = parseCommitActivityPayload({
-    ...identity,
-    range: "month",
-    ...timeline,
-  });
-  assert.equal(year.kind, "legacy");
-  assert.equal(month.kind, "legacy");
-  if (year.kind === "legacy" && month.kind === "legacy") {
-    const combined = combineLegacyCommitActivity(year.data, month.data);
-    assert.deepEqual(combined.ranges.month.buckets, timeline.buckets);
-    assert.deepEqual(combined.ranges.year.buckets, timeline.buckets);
-  }
+  assert.equal(parsed.ranges.month.totalCommits, 2);
 });
 
 test("rejects a success payload with missing ranges", () => {
   assert.throws(
     () => parseCommitActivityPayload(identity),
+    /invalid commit activity response/i,
+  );
+});
+
+test("rejects a bundled payload missing one required range", () => {
+  assert.throws(
+    () =>
+      parseCommitActivityPayload({
+        ...identity,
+        ranges: { month: timeline },
+      }),
     /invalid commit activity response/i,
   );
 });
@@ -85,5 +74,5 @@ test("accepts a valid empty timeline", () => {
       year: timeline,
     },
   });
-  assert.equal(parsed.kind, "bundled");
+  assert.equal(parsed.ranges.month.totalCommits, 0);
 });

@@ -17,10 +17,6 @@ import { Input } from "@/components/ui/input";
 import { GlowText } from "@/components/glow-text";
 import { cn } from "@/lib/utils";
 
-// The saved-projects feature flag. Duplicate detection only makes sense when
-// History is on and the user is signed in (History is per-user); off otherwise.
-const SAVED_FEATURE_ENABLED = process.env.NEXT_PUBLIC_SHOW_SAVED === "true";
-
 // A repo the user is about to analyze that already exists in their History.
 type DuplicateMatch = {
   owner: string;
@@ -71,9 +67,9 @@ export function RepoUrlForm() {
     try {
       const parsedRepo = await parseRepoUrl(repoUrl);
 
-      // Duplicate check: only when History is on and the user is signed in. A
-      // lookup failure is non-fatal — fall through to a normal fresh analysis.
-      if (SAVED_FEATURE_ENABLED && status === "signedIn") {
+      // Duplicate checks are user-scoped. A History lookup failure is non-fatal
+      // and falls through to a normal fresh analysis.
+      if (status === "signedIn") {
         try {
           const projects = await listProjects();
           const match = projects.find(

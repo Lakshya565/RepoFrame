@@ -1,11 +1,16 @@
-import { getAccessToken } from "@/lib/supabase";
 import type { UserContext } from "@/lib/user-context";
 import {
-  combineLegacyCommitActivity,
   parseCommitActivityPayload,
-  type CommitActivityRange,
   type CommitActivityResponse,
 } from "@/lib/commit-activity";
+import {
+  API_BASE_URL,
+  ApiError,
+  authHeaders,
+  getApiErrorMessage,
+  parseJsonResponse,
+  type ApiErrorResponse,
+} from "@/lib/api-client";
 
 export type {
   CommitActivityRange,
@@ -106,25 +111,6 @@ export type RepoAnalysisStreamEvent =
       retryable: boolean;
     };
 
-type ApiErrorResponse = {
-  detail?: unknown;
-};
-
-// An error carrying the backend HTTP status, so callers can react to specific codes
-// (e.g. auto-retry a 503 "still computing" from GitHub's lazy stats endpoints)
-// rather than only having the message string.
-export class ApiError extends Error {
-  readonly status: number;
-  constructor(message: string, status: number) {
-    super(message);
-    this.name = "ApiError";
-    this.status = status;
-  }
-}
-
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
-
 let backendWarmupStarted = false;
 
 // Best-effort process wake-up on analysis intent. The health endpoint does not
@@ -135,16 +121,6 @@ export function warmBackend(): void {
   }
   backendWarmupStarted = true;
   void fetch(`${API_BASE_URL}/health`, { method: "GET" }).catch(() => undefined);
-}
-
-// Authorization header for backend calls that are login-gated when Supabase is
-// configured (analyze / generate / verify). Returns the signed-in user's Supabase
-// access token as a Bearer, or {} when signed out / unconfigured — so the public
-// dev flow sends no header and is unchanged. The backend decides whether the
-// header is required (require_user_when_configured).
-async function authHeaders(): Promise<Record<string, string>> {
-  const token = await getAccessToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 // Sends raw repo input to the backend parser and returns the normalized identity
@@ -197,7 +173,10 @@ export async function streamRepoAnalysis(
       await fetchLegacyRepoAnalysis(repoUrl, onEvent, signal);
       return;
     }
-    await parseResponse(response, "RepoFrame could not analyze this repository.");
+    await parseJsonResponse(
+      response,
+      "RepoFrame could not analyze this repository.",
+    );
     return;
   }
   if (!response.body) {
@@ -238,8 +217,8 @@ export async function streamRepoAnalysis(
   }
 }
 
-// Temporary deployment-skew adapter. The ordinary path remains one progressive
-// stream; these four requests run only when the deployed backend lacks that route.
+// Deployment-skew fallback. The ordinary path remains one progressive stream;
+// these four requests run only when the deployed backend lacks that route.
 async function fetchLegacyRepoAnalysis(
   repoUrl: string,
   onEvent: (event: RepoAnalysisStreamEvent) => void,
@@ -299,9 +278,8 @@ function parseAnalysisStreamFrame(
   return null;
 }
 
-// Fetches both bucketed timelines together so range changes stay local. During
-// one staggered deployment window, an older backend may still return one range;
-// detect that contract and explicitly fetch the missing month before normalizing.
+// Fetches both bucketed timelines together so range changes stay local. The
+// response is validated at the network boundary before it reaches React.
 export async function fetchCommitActivity(
   repoUrl: string,
 ): Promise<CommitActivityResponse> {
@@ -310,23 +288,7 @@ export async function fetchCommitActivity(
     repoUrl,
     "RepoFrame could not fetch commit activity.",
   );
-  const parsed = parseCommitActivityPayload(payload);
-  if (parsed.kind === "bundled") {
-    return parsed.data;
-  }
-
-  const missingRange: CommitActivityRange =
-    parsed.data.range === "year" ? "month" : "year";
-  const fallbackPayload = await postJson<unknown>(
-    "/api/repo/commit-activity",
-    { repoUrl, range: missingRange },
-    "RepoFrame could not fetch commit activity.",
-  );
-  const fallback = parseCommitActivityPayload(fallbackPayload);
-  if (fallback.kind === "bundled") {
-    return fallback.data;
-  }
-  return combineLegacyCommitActivity(parsed.data, fallback.data);
+  return parseCommitActivityPayload(payload);
 }
 
 // GitHub computes its /stats/* endpoints lazily and returns "still computing" (which
@@ -780,7 +742,7 @@ async function postJson<T>(
     body: JSON.stringify(body),
   });
 
-  return parseResponse(response, fallbackMessage);
+  return parseJsonResponse(response, fallbackMessage);
 }
 
 // Posts to repo-analysis endpoints that share the same { repoUrl } request
@@ -799,38 +761,5 @@ async function postRepoRequest<T>(
     body: JSON.stringify({ repoUrl }),
   });
 
-  return parseResponse(response, fallbackMessage);
-}
-
-// Converts a Fetch response into typed JSON or a useful Error. FastAPI returns
-// { detail } for expected failures, so this preserves backend messages.
-async function parseResponse<T>(
-  response: Response,
-  fallbackMessage: string,
-): Promise<T> {
-  if (!response.ok) {
-    const errorBody = (await response.json().catch(
-      () => ({}),
-    )) as ApiErrorResponse;
-
-    throw new ApiError(
-      getApiErrorMessage(errorBody, fallbackMessage),
-      response.status,
-    );
-  }
-
-  return (await response.json()) as T;
-}
-
-// Chooses the backend's explicit error detail when available, otherwise falls
-// back to the caller-specific message for network or malformed error bodies.
-function getApiErrorMessage(
-  errorBody: ApiErrorResponse,
-  fallbackMessage: string,
-): string {
-  if (typeof errorBody.detail === "string") {
-    return errorBody.detail;
-  }
-
-  return fallbackMessage;
+  return parseJsonResponse(response, fallbackMessage);
 }

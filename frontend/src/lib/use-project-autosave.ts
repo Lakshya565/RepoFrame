@@ -9,17 +9,13 @@ import { saveProject, type SaveProjectRequest } from "@/lib/projects-api";
 
 // Best-effort auto-save of the current analysis snapshot to the signed-in user's
 // account. Debounced so a burst of edits/generations coalesces into one write, and
-// gated so it never runs in the public/dev flow:
-//   * NEXT_PUBLIC_SHOW_SAVED must be "true" (the saved-projects feature flag),
-//   * the user must be signed in,
-//   * repo metadata must exist (i.e. the repo has been analyzed).
+// gated so it never runs in the signed-out flow: the user must be signed in and
+// repository metadata must exist (meaning the repository has been analyzed).
 // Analyzing a repo is enough to record it in History — generated content is NOT
 // required. The row is created on analysis and later upserts (same repo URL) once a
 // writeup is generated, so History becomes a true record of every repo looked at.
 // Failures are swallowed — persistence must never interrupt or surface over the
 // generation flow.
-
-const SAVED_FEATURE_ENABLED = process.env.NEXT_PUBLIC_SHOW_SAVED === "true";
 
 // How long to wait after the last change before writing. One tunable place.
 const AUTOSAVE_DEBOUNCE_MS = 1500;
@@ -58,7 +54,6 @@ export function useProjectAutoSave(): void {
 
   useEffect(() => {
     // All the gates. Any failing one means "don't auto-save" — cleanly inert.
-    if (!SAVED_FEATURE_ENABLED) return;
     if (status !== "signedIn") return;
     // Metadata present == the repo has been analyzed; that alone is savable.
     if (!repoMetadata) return;

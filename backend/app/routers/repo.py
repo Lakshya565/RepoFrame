@@ -219,9 +219,8 @@ def get_repo_tree(
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
-# Fetches the default-branch tree and returns deterministic Phase 5 file
-# selections. The route only orchestrates services and leaves scoring rules in
-# file_ranker.py so future phases can reuse the same ranking behavior.
+# Fetches the default-branch tree and returns deterministic file selections. The
+# route only orchestrates services; file_ranker.py owns the scoring rules.
 @router.post("/ranked-files", response_model=RepoFileRankingResponse)
 def get_ranked_repo_files(
     request: RepoParseRequest,

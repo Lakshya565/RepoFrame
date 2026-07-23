@@ -9,19 +9,9 @@ from pathlib import Path
 from app.services import supabase_client
 from app.services.llm_client import EMPTY_USAGE, TokenUsage
 
-# Persistent lifetime token ledger. This is a deliberately tiny stopgap: a single
-# JSON file holding the cumulative OpenAI token totals RepoFrame's backend has ever
-# spent, so the user can track project spend without opening the OpenAI dashboard
-# (whose usage page lags by minutes to a day). It is NOT the real database.
-#
-# Phase 15 migration note: when Supabase/Postgres lands, replace this file-backed
-# implementation with a DB-backed one behind the same record()/get_total()
-# interface — routes and frontend will not change. The data file is git-ignored
-# (see .gitignore: backend/data/), so the ledger is local state, not committed.
-#
-# Scope caveats (documented for whoever reads the number): (1) it counts only what
-# THIS backend spends, not the whole OpenAI account, so a shared key makes it
-# differ from the dashboard; (2) it is backend-global, not per-user (no auth yet).
+# Persistent token ledger. Production records per-user usage in Supabase; the
+# git-ignored JSON file is the no-Supabase development fallback. Totals cover only
+# calls made by this backend, so they can differ from an account-wide dashboard.
 
 logger = logging.getLogger(__name__)
 

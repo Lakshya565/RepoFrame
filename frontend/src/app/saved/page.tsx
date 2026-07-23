@@ -2,11 +2,7 @@ import { SiteHeader } from "@/components/site-header";
 import { SavedProjectsList } from "@/components/saved-projects-list";
 import { ConnectReposButton } from "@/components/connect-repos-button";
 
-// Standalone "Saved projects" page. A signed-in user's home for their saved
-// analyses, separate from any single repo's History tab. Gated behind
-// NEXT_PUBLIC_SHOW_SAVED so it stays dark until the feature ships.
-const SAVED_FEATURE_ENABLED = process.env.NEXT_PUBLIC_SHOW_SAVED === "true";
-
+// Standalone home for a signed-in user's saved repository analyses.
 export default function SavedPage() {
   return (
     <main className="flex min-h-screen flex-col">
@@ -26,13 +22,7 @@ export default function SavedPage() {
           <ConnectReposButton className="shrink-0" />
         </div>
         <div className="mt-6">
-          {SAVED_FEATURE_ENABLED ? (
-            <SavedProjectsList />
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Saved projects will appear here once the feature is enabled.
-            </p>
-          )}
+          <SavedProjectsList />
         </div>
       </div>
     </main>

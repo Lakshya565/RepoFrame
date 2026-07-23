@@ -16,8 +16,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 // instead of analyzing a throwaway repo just to reach History. Renders NOTHING for
 // signed-out visitors, in local dev (feature off), or when there are no saved
 // analyses — so the signed-out landing is completely unchanged.
-const SAVED_FEATURE_ENABLED = process.env.NEXT_PUBLIC_SHOW_SAVED === "true";
-
 // How many recent analyses to surface inline before linking out to the full list.
 const MAX_SHOWN = 4;
 
@@ -30,7 +28,7 @@ export function LandingRecentProjects() {
   // Load once signed in. Fails quiet (empty) — a landing-page convenience should
   // never surface an error banner.
   useEffect(() => {
-    if (!SAVED_FEATURE_ENABLED || status !== "signedIn") {
+    if (status !== "signedIn") {
       return;
     }
     let active = true;
@@ -56,7 +54,7 @@ export function LandingRecentProjects() {
     };
   }, [status]);
 
-  if (!SAVED_FEATURE_ENABLED || status !== "signedIn") {
+  if (status !== "signedIn") {
     return null;
   }
 

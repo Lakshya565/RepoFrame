@@ -24,9 +24,6 @@ from app import config
 #    be scoped by the JWT-verified user_id. RLS (enabled in the migration) is only
 #    the defense-in-depth backstop, not the primary guard.
 #
-# Phase 15 note: 15.0 only establishes this foundation. Nothing imports it yet, so
-# the app's behavior is unchanged. Storage (15.2) and auth (15.1) build on top.
-
 if TYPE_CHECKING:  # pragma: no cover - typing only, no runtime import
     from supabase import Client
 

@@ -4,9 +4,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AuthProvider } from "@/lib/auth-context";
 import { ScrollProgress } from "@/components/ui/scroll-progress";
-
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+import { API_BASE_URL } from "@/lib/api-client";
 
 // IBM Plex Sans for body/UI text and JetBrains Mono for code, file paths, and
 // data labels — a deliberate developer-tool pairing rather than a single generic
