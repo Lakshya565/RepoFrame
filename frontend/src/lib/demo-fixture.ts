@@ -158,83 +158,59 @@ export const DEMO_PROJECT: ProjectDetail = {
   },
   outputs: {
     resumeBullets: [
-      "Built RepoFrame, a full-stack repository analysis platform using Next.js, TypeScript, FastAPI, and Python that converts GitHub projects into structured profiles, resume bullets, README copy, portfolio blurbs, LinkedIn descriptions, and interview preparation grounded in repository evidence.",
-      "Designed a deterministic evidence pipeline that analyzes GitHub metadata, language totals, recursive file trees, README content, manifests, configuration files, and selected source files, then filters and ranks high-value evidence before any language-model request.",
-      "Implemented a budget-aware OpenAI generation workflow that separates code-backed facts from user-provided contribution and impact context, validates structured responses with Pydantic, and reuses a shared project profile across generation and revision workflows.",
-      "Developed an Agentic Audit through a bounded Evidence Investigator that can list authorized repository paths, read safe text files, search accumulated evidence, and classify claims as supported, partially supported, unsupported, or requiring user confirmation.",
-      "Improved Analysis-page performance by replacing six independent browser requests with one progressive server-sent event stream plus deferred commit activity, backed by bounded LRU caching, stale revalidation, GitHub ETags, and single-flight request deduplication.",
-      "Implemented Supabase authentication and saved-project persistence, fine-grained private-repository access through a GitHub App, persistent token accounting, and per-user and global model-call quotas while keeping secret-bearing operations inside the FastAPI backend.",
+      "Built RepoFrame, a full-stack Next.js, TypeScript, FastAPI, and Python platform that turns GitHub repositories into evidence-backed resume, README, portfolio, LinkedIn, and interview content.",
+      "Designed a deterministic analysis pipeline that ingests repository metadata, structure, documentation, manifests, configuration, and selected source files, then filters and ranks the strongest evidence before generation.",
+      "Implemented a budget-aware OpenAI workflow that separates repository facts from user-provided context, validates structured responses with Pydantic, and reuses a shared project profile for targeted revisions.",
+      "Developed a bounded Agentic Audit that searches authorized paths, reads safe text files, and classifies generated claims by evidence strength without modifying or executing repository code.",
+      "Improved reliability and speed with progressive analysis streaming, deferred commit statistics, bounded caching, ETag revalidation, isolated card failures, Supabase history, and GitHub App authorization.",
     ],
     readmeIntro:
-      "# RepoFrame\n\nRepoFrame turns a GitHub repository into project writeups you can actually defend. It analyzes repository metadata, language totals, structure, documentation, dependency manifests, configuration files, and selected source files before producing a structured project profile and generating resume bullets, README copy, portfolio content, LinkedIn descriptions, and interview preparation.\n\nThe core difference is the evidence pipeline around the model. RepoFrame deterministically filters and ranks repository files, detects technologies from multiple signals, keeps repository facts separate from user-provided contribution and impact context, and fits the complete request within a bounded prompt budget. This keeps generation focused on the most useful source material instead of sending an entire codebase or relying on a repository description alone.\n\nAn optional Agentic Audit uses a bounded, read-only Evidence Investigator to examine the initial evidence, search the authorized repository index, read additional safe text files when necessary, and classify generated claims by how strongly the available evidence supports them. The investigator cannot modify the repository, execute code, or access arbitrary resources.\n\nRepoFrame is built with Next.js, React, TypeScript, Tailwind CSS, FastAPI, Python, Pydantic, Supabase, the GitHub REST API, a GitHub App, and OpenAI. Progressive analysis, cache reuse, ETag revalidation, request deduplication, isolated card failures, saved history, token accounting, and model-call quotas support a responsive and controlled end-to-end workflow.",
+      "# RepoFrame\n\nRepoFrame turns a GitHub repository into project writeups a developer can explain and defend. It analyzes repository metadata, structure, documentation, manifests, configuration, and selected source files, then uses that evidence to generate resume bullets, README copy, portfolio blurbs, LinkedIn descriptions, and interview preparation.\n\nBefore generation, RepoFrame filters low-value files, ranks the most useful evidence, detects the technology stack from multiple repository signals, and fits the complete request within a bounded prompt budget. Repository facts stay separate from user-provided context such as contribution, intent, and impact.\n\nAn optional Agentic Audit can search authorized repository paths and read additional safe text files before labeling claims by support level. The platform combines a Next.js and TypeScript frontend with FastAPI, Python, Pydantic, Supabase, GitHub, and OpenAI, with progressive analysis, cache reuse, saved history, and usage controls supporting the workflow.",
     portfolioBlurb:
-      "RepoFrame is a full-stack developer platform I designed and built to turn GitHub repositories into clear, evidence-backed project narratives. It addresses a common problem for developers: understanding a project deeply but struggling to explain its architecture, technical decisions, and personal contribution without becoming vague or overstating what the code proves.\n\nThe application uses the GitHub REST API to analyze repository metadata, languages, file structure, README content, manifests, configuration, and selected source files. A deterministic ranking pipeline prioritizes useful evidence and removes low-value repository noise before a bounded OpenAI workflow builds a structured project profile. That profile becomes the shared source for resume bullets, README introductions, portfolio blurbs, LinkedIn descriptions, section-level revisions, and interview talking points.\n\nI also implemented an optional Evidence Investigator that performs a bounded Agentic Audit. It can search the authorized repository index and read additional safe text files when the initial evidence is not enough, then labels important generated claims by their support level and explains the result.\n\nThe system uses a Next.js and TypeScript frontend, a FastAPI and Python backend, Supabase authentication and PostgreSQL persistence, GitHub OAuth for identity, and a GitHub App for fine-grained repository access. Progressive streaming, bounded caches, ETags, single-flight request deduplication, lazy rendering, saved-project history, token accounting, and model-call quotas improve responsiveness and control operating cost. In my own workflow, RepoFrame can turn roughly an hour of manual project-writeup work into an evidence-backed first draft in under a minute.",
+      "RepoFrame is a full-stack developer platform I designed and built to turn GitHub repositories into clear, evidence-backed project narratives. It analyzes repository structure, documentation, manifests, configuration, and selected source files, then ranks the strongest evidence before building a reusable project profile. That profile powers resume bullets, README copy, portfolio and LinkedIn descriptions, revisions, and interview preparation without treating the repository description as the complete story.\n\nThe application uses Next.js and TypeScript on the frontend, FastAPI and Python on the backend, Supabase for authentication and persistence, a GitHub App for fine-grained repository access, and OpenAI for structured generation. I also built a bounded Evidence Investigator that can search authorized paths and inspect additional safe files before rating important claims. Progressive streaming, cache reuse, and isolated loading failures keep the analysis responsive. In my own workflow, RepoFrame can turn roughly an hour of manual project-writeup work into an evidence-backed first draft in under a minute.",
     linkedinDescription:
-      "I built RepoFrame, a full-stack repository analysis platform that helps developers turn GitHub projects into clear, accurate, and reusable project writeups. The idea came from a problem I kept seeing: developers often understand the code they wrote but struggle to explain it effectively on a resume, portfolio, README, LinkedIn profile, or in an interview. Generic AI writing tools can make that worse by producing vague descriptions or technical claims that the project does not actually support.\n\nRepoFrame analyzes the repository before it generates anything. It uses the GitHub REST API to collect metadata, language totals, the recursive file tree, README content, dependency manifests, configuration files, and selected source files. I built deterministic filtering and ranking logic to prioritize documentation, infrastructure, entry points, tests, manifests, and important implementation files while excluding generated content, binaries, dependency directories, and other low-value context.\n\nThe selected evidence passes through a bounded prompt-building pipeline that limits file counts, individual file sizes, total evidence, and the complete rendered request. Repository-backed facts stay separate from user-provided context such as personal contribution, team role, intent, challenges, or impact. OpenAI's GPT-5.6 Luna model then constructs a validated project profile that becomes the source for resume bullets, README introductions, portfolio blurbs, LinkedIn descriptions, individual revisions, and interview preparation.\n\nI also built an optional Evidence Investigator for the Agentic Audit. Instead of asking the model to verify itself in one prompt, the investigator can use bounded, read-only tools to list authorized repository paths, search accumulated evidence, and inspect additional safe text files. It then classifies generated claims as supported, partially supported, unsupported, or requiring user confirmation and returns the evidence and explanation behind each verdict.\n\nThe frontend uses Next.js, React, TypeScript, Tailwind CSS, Motion, and Recharts. The backend uses FastAPI, Python, Pydantic, the GitHub API, and OpenAI. Supabase provides GitHub authentication and PostgreSQL persistence, while a separate GitHub App grants fine-grained access to selected public or private repositories. Secret-bearing API calls and authorization decisions remain inside the backend.\n\nI spent significant time on performance and reliability as the project grew. I replaced six independent Analysis requests with one progressive server-sent event stream plus deferred commit activity, added bounded LRU caches and stale-while-revalidate behavior, reused GitHub HTTP sessions, implemented ETag revalidation, and collapsed concurrent duplicate requests through single-flight coordination. Individual cards keep independent loading and error states so one slow or malformed upstream response does not take down the entire page.\n\nRepoFrame also supports saved-project history, reopening completed work without paying for another generation, per-section regeneration, token accounting, per-user and global model-call quotas, private cache isolation, and a signed-in workflow that persists project context, outputs, interview preparation, guidance, and audit results. In my own workflow, it can turn roughly an hour of manual project-writeup work into an evidence-backed first draft in under a minute.\n\nThe project taught me that building a trustworthy AI feature is mostly about the system surrounding the model: deciding what evidence matters, enforcing request limits, separating code-backed facts from human context, validating structured output, handling partial failures, preserving authorization boundaries, and making the model's conclusions inspectable rather than treating generated text as automatically correct.",
+      "I built RepoFrame, a full-stack repository analysis platform that helps developers turn GitHub projects into clear, reusable project writeups. The goal was to solve a problem I kept seeing: developers understand their code but often struggle to explain the architecture, decisions, and personal contribution without becoming vague or overstating what the repository proves.\n\nRepoFrame analyzes the project before generating anything. It collects repository metadata, structure, documentation, manifests, configuration, and selected source files, then applies deterministic filtering and ranking to prioritize useful evidence. A bounded prompt pipeline keeps repository-backed facts separate from user context and uses GPT-5.6 Luna to create a validated project profile for resume, README, portfolio, LinkedIn, revision, and interview workflows.\n\nFor the Agentic Audit, I built a read-only Evidence Investigator that can search authorized repository paths and inspect additional safe text files when the initial evidence is not enough. It returns supported, partial, unsupported, or user-confirmation verdicts with the evidence behind each decision.\n\nRepoFrame uses Next.js, TypeScript, Tailwind CSS, FastAPI, Python, Pydantic, Supabase, GitHub, and OpenAI. To keep analysis responsive, I replaced several independent requests with a progressive core stream, deferred slower commit statistics, reused cached snapshots, and isolated card failures. Saved history, GitHub App authorization, token accounting, and model-call quotas make the workflow reusable while keeping credentials and paid operations in the backend.",
   },
   interviewTopics: [
     {
       question:
         "How do you keep the generated writeups grounded instead of hallucinated?",
       talkingPoints: [
-        "Repository URL parsing, GitHub access, file filtering, ranking, stack detection, and evidence limits are deterministic rather than delegated to the model.",
-        "The model receives selected README, configuration, manifest, and source excerpts together with explicit source paths instead of an unstructured repository dump.",
-        "Repository evidence and user context are separate evidence classes, so code is not used to invent personal ownership, intent, team role, or business impact.",
-        "Pydantic validates structured model responses, and the optional Evidence Investigator gives important claims a separate support verdict.",
+        "Repository parsing, file filtering, ranking, stack detection, and evidence limits are deterministic rather than delegated to the model.",
+        "The model receives selected excerpts with source paths, while personal contribution and impact remain clearly labeled as user context.",
+        "Pydantic validates structured responses, and the optional Agentic Audit gives important claims a separate support verdict.",
       ],
     },
     {
-      question: "How is generation cost controlled?",
+      question: "How does RepoFrame decide what repository evidence matters?",
       talkingPoints: [
-        "The backend limits selected files, characters per file, total evidence characters, and the complete rendered prompt before calling OpenAI.",
-        "Higher-ranked evidence is preserved first, truncated excerpts are marked, and requests that cannot fit safely are rejected before spending tokens.",
-        "Generation remains button-triggered, while interview preparation, revisions, and the Agentic Audit are separate explicit actions.",
-        "Actual prompt, completion, reasoning, and total tokens are persisted, and Supabase-backed per-user and global model-call quotas cap daily spend.",
-      ],
-    },
-    {
-      question: "How does RepoFrame decide which repository files matter?",
-      talkingPoints: [
-        "It fetches structure before broad file contents, which makes the first ranking pass inexpensive and deterministic.",
-        "Filtering removes generated assets, binaries, dependency folders, lockfile noise, and unsupported file types.",
-        "Ranking rewards README files, manifests, configuration, infrastructure, tests, entry points, and important source paths with explicit reasons.",
-        "The Evidence Investigator can later search the allowlisted tree when a particular claim needs evidence outside the initial bundle.",
+        "RepoFrame fetches the repository tree first, removes generated or unsupported files, and ranks the remaining paths before reading broad contents.",
+        "Documentation, manifests, configuration, tests, entry points, and important source paths receive explicit ranking reasons.",
+        "File counts, excerpt sizes, total evidence, and the complete prompt are bounded so stronger evidence survives first.",
       ],
     },
     {
       question: "Why is the Evidence Investigator genuinely agentic?",
       talkingPoints: [
-        "The model receives a bounded set of read-only tools rather than a prewritten chain of repository lookups.",
-        "It decides whether the initial evidence is sufficient, which search to perform, and which safe text file needs closer inspection.",
-        "Tool turns, searches, additional file reads, and model calls are bounded to control latency, cost, and access scope.",
-        "A separate tool-free verdict step compiles the gathered evidence into consistent supported, partial, confirmation-required, or unsupported classifications.",
+        "The model receives bounded read-only tools instead of a fixed sequence of repository lookups.",
+        "It decides whether to search the authorized tree or inspect an additional safe text file before reaching a verdict.",
+        "Tool turns and file reads are capped, and a separate verdict step converts gathered evidence into consistent support classifications.",
       ],
     },
     {
       question: "What did you do to improve Analysis-page performance?",
       talkingPoints: [
-        "The first design made six independent browser requests and repeated repository discovery work across components.",
-        "The current backend builds one core snapshot and streams metadata, structure, ranking, and technology results progressively, then starts commit activity separately.",
-        "Bounded LRU caches, five-minute freshness, stale-while-revalidate behavior, ETags, reusable GitHub sessions, and single-flight coordination reduce repeat work.",
-        "The frontend keeps a small session cache across tabs, lazy-loads the repository tree and chart, and renders only expanded tree branches.",
+        "The backend builds one shared core snapshot and streams analysis stages progressively instead of repeating repository discovery across cards.",
+        "Commit activity remains separate because GitHub may compute those statistics slowly, so it cannot block the core page.",
+        "Bounded caches, ETags, request deduplication, lazy rendering, and card-level error isolation improve repeat loads and resilience.",
       ],
     },
     {
-      question: "How do authentication and private-repository access work?",
+      question: "What security and product tradeoffs did you make?",
       talkingPoints: [
-        "Supabase GitHub OAuth establishes user identity, and the FastAPI backend verifies the bearer token before trusting the user ID.",
-        "A separate GitHub App handles repository authorization and issues fine-grained, short-lived installation tokens for selected repositories.",
-        "Private cache keys include the verified user and GitHub installation, while frontend private session data clears on sign-out.",
-        "OpenAI credentials, the Supabase service-role key, GitHub App private keys, and installation tokens never enter the browser bundle or saved project records.",
-      ],
-    },
-    {
-      question: "What are RepoFrame's main limitations and next improvements?",
-      talkingPoints: [
-        "The Evidence Investigator can still miss a weak claim because tool choice and evidence interpretation remain model decisions.",
-        "Process-memory caches are simple and effective for the current workload but reset during deploys and are not shared across multiple backend replicas.",
-        "GitHub commit statistics can be slow or temporarily unavailable because GitHub computes them lazily, so the chart remains intentionally isolated and retryable.",
-        "A future labeled evaluation set would be needed before making accuracy, precision, or recall claims about the audit workflow.",
+        "Supabase handles identity and saved history, while a separate GitHub App grants fine-grained repository access with short-lived tokens.",
+        "Secret-bearing requests and authorization decisions stay in FastAPI, and private cache entries are scoped to the verified user and installation.",
+        "The investigator can still miss a claim, and process-memory caches reset on deploys; both are honest limitations rather than hidden guarantees.",
       ],
     },
   ],
@@ -242,137 +218,84 @@ export const DEMO_PROJECT: ProjectDetail = {
   verifications: [
     {
       claim:
-        "Built a full-stack repository analysis platform with Next.js, TypeScript, FastAPI, and Python that generates multiple evidence-backed project writeups",
+        "Built RepoFrame, a full-stack Next.js, TypeScript, FastAPI, and Python platform that turns GitHub repositories into evidence-backed resume, README, portfolio, LinkedIn, and interview content.",
       status: "supported",
-      sections: [
-        "resumeBullets",
-        "readmeIntro",
-        "portfolioBlurb",
-        "linkedinDescription",
-      ],
+      sections: ["resumeBullets"],
       supportingEvidence: [
         "backend/app/main.py",
         "backend/app/services/output_generator.py",
         "frontend/src/components/project-writeup-section.tsx",
       ],
       explanation:
-        "The backend exposes the generation workflow, while the frontend renders the profile, resume, README, portfolio, LinkedIn, and interview-preparation surfaces described in the claim.",
+        "The repository contains the FastAPI generation routes and services alongside the Next.js interface that renders each listed output type.",
       suggestedRevision: null,
     },
     {
       claim:
-        "Designed a deterministic GitHub evidence pipeline that filters and ranks repository files and detects the technology stack from multiple repository signals",
+        "Before generation, RepoFrame filters low-value files, ranks the most useful evidence, detects the technology stack from multiple repository signals, and fits the complete request within a bounded prompt budget.",
       status: "supported",
-      sections: [
-        "resumeBullets",
-        "readmeIntro",
-        "portfolioBlurb",
-        "linkedinDescription",
-      ],
+      sections: ["readmeIntro"],
       supportingEvidence: [
-        "backend/app/services/github_service.py",
         "backend/app/services/file_ranker.py",
         "backend/app/services/tech_stack_detector.py",
-      ],
-      explanation:
-        "The GitHub service gathers repository inputs, the ranker scores high-value paths with explicit reasons, and stack detection combines languages, filenames, manifests, configuration, README references, and selected file contents.",
-      suggestedRevision: null,
-    },
-    {
-      claim:
-        "Implemented a budget-aware OpenAI workflow that separates repository evidence from user context and validates structured generation results with Pydantic",
-      status: "supported",
-      sections: [
-        "resumeBullets",
-        "readmeIntro",
-        "portfolioBlurb",
-        "linkedinDescription",
-      ],
-      supportingEvidence: [
         "backend/app/services/prompt_budget.py",
-        "backend/app/services/prompt_format.py",
-        "backend/app/services/profile_generator.py",
       ],
       explanation:
-        "The prompt pipeline applies a complete request budget, formats repository and user-provided evidence separately, and parses the result into the backend's structured project-profile model.",
+        "Dedicated services implement deterministic file scoring, multi-signal stack detection, and complete rendered-request budget fitting before generation.",
       suggestedRevision: null,
     },
     {
       claim:
-        "Built a bounded Agentic Audit that can search authorized repository paths, read safe text files, and return structured support verdicts",
+        "For the Agentic Audit, I built a read-only Evidence Investigator that can search authorized repository paths and inspect additional safe text files when the initial evidence is not enough.",
       status: "supported",
-      sections: [
-        "resumeBullets",
-        "readmeIntro",
-        "portfolioBlurb",
-        "linkedinDescription",
-      ],
+      sections: ["linkedinDescription"],
       supportingEvidence: [
         "backend/app/services/evidence_investigator.py",
         "backend/app/services/claim_verifier.py",
       ],
       explanation:
-        "The investigator defines allowlisted read-only repository tools with bounded calls and file reads, and the verifier converts the gathered material into supported, partial, confirmation-required, or unsupported findings.",
+        "The investigator exposes bounded list, search, and safe-file read tools over the authorized repository index before a separate verdict step.",
       suggestedRevision: null,
     },
     {
       claim:
-        "Reduced the initial Analysis workflow from six browser requests to one progressive core stream plus one deferred commit-activity request",
+        "To keep analysis responsive, I replaced several independent requests with a progressive core stream, deferred slower commit statistics, reused cached snapshots, and isolated card failures.",
       status: "supported",
-      sections: ["resumeBullets", "portfolioBlurb", "linkedinDescription"],
+      sections: ["linkedinDescription"],
       supportingEvidence: [
         "backend/app/services/analysis_service.py",
         "backend/app/routers/repo.py",
         "frontend/src/lib/analysis-context.tsx",
       ],
       explanation:
-        "The backend builds and streams a shared core-analysis snapshot, while the frontend consumes that stream and starts the independently retryable commit request after core analysis completes.",
+        "The backend streams a reusable core snapshot, while the frontend starts commit activity separately and keeps each Analysis card behind its own failure boundary.",
       suggestedRevision: null,
     },
     {
       claim:
-        "Implemented signed-in project history, private-repository access, persistent token accounting, and model-call quotas without exposing service credentials to the frontend",
+        "Saved history, GitHub App authorization, token accounting, and model-call quotas make the workflow reusable while keeping credentials and paid operations in the backend.",
       status: "supported",
-      sections: [
-        "resumeBullets",
-        "readmeIntro",
-        "portfolioBlurb",
-        "linkedinDescription",
-      ],
+      sections: ["linkedinDescription"],
       supportingEvidence: [
-        "backend/app/services/auth.py",
         "backend/app/services/project_store.py",
         "backend/app/services/github_app.py",
         "backend/app/services/usage_store.py",
         "backend/app/services/rate_limit.py",
       ],
       explanation:
-        "The backend verifies Supabase identity, scopes stored projects to that user, brokers GitHub App installation access, records model usage, and enforces persistent usage limits using server-side credentials.",
+        "Backend services scope saved projects, broker GitHub App access, record model usage, and enforce persistent call limits without returning service credentials to the browser.",
       suggestedRevision: null,
     },
     {
       claim:
-        "In my own workflow, RepoFrame can turn roughly an hour of manual project-writeup work into an evidence-backed first draft in under a minute",
+        "In my own workflow, RepoFrame can turn roughly an hour of manual project-writeup work into an evidence-backed first draft in under a minute.",
       status: "needs_user_confirmation",
-      sections: ["portfolioBlurb", "linkedinDescription"],
+      sections: ["portfolioBlurb"],
       supportingEvidence: [],
       explanation:
         "The repository proves the automated workflow, but it cannot verify the author's previous manual baseline or the measured end-to-end completion time. This personal outcome should be confirmed by the user before publication.",
       suggestedRevision:
         "RepoFrame streamlines manual project-writeup work into an evidence-backed first draft.",
-    },
-    {
-      claim:
-        "Added bounded caching, stale revalidation, GitHub ETags, and single-flight coordination to reduce repeated repository work",
-      status: "supported",
-      sections: ["resumeBullets", "readmeIntro", "portfolioBlurb", "linkedinDescription"],
-      supportingEvidence: [
-        "backend/app/services/analysis_service.py",
-        "backend/app/services/github_service.py",
-      ],
-      explanation:
-        "The shared analysis service owns bounded repository caches and concurrent-build coordination, while GitHub requests preserve validators for conditional revalidation of unchanged resources.",
-      suggestedRevision: null,
     },
   ],
   verificationModel: null,
