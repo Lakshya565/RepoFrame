@@ -8,7 +8,7 @@ import { Card } from "@/components/ui/card";
 // holds no real data and never calls the saved-projects API.
 export default function DemoHistoryPage() {
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" data-demo-target="history-content">
       <h2 className="text-base font-semibold">Saved analyses</h2>
       <GateOverlay title="Log in to keep your history">
         <ul className="grid gap-3 sm:grid-cols-2">

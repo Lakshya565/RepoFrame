@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { cn } from "@/lib/utils";
+import { useDemoWalkthrough } from "@/lib/demo-walkthrough";
 
 // The analysis page's top-level sections, in display order. Each is a real route
 // segment under the repo's base path (an empty segment is the base path itself).
@@ -28,6 +29,7 @@ type AnalysisTabsProps = {
 // is calm under prefers-reduced-motion.
 export function AnalysisTabs({ basePath }: AnalysisTabsProps) {
   const pathname = usePathname();
+  const { dispatch } = useDemoWalkthrough();
 
   return (
     <nav aria-label="Analysis sections" className="border-b">
@@ -41,6 +43,32 @@ export function AnalysisTabs({ basePath }: AnalysisTabsProps) {
               <Link
                 href={href}
                 aria-current={isActive ? "page" : undefined}
+                data-demo-target={
+                  basePath === "/demo"
+                    ? tab.segment === "generate"
+                      ? "generate-tab"
+                      : tab.segment === "history"
+                        ? "history-tab"
+                        : undefined
+                    : undefined
+                }
+                onClick={(event) => {
+                  if (
+                    basePath !== "/demo" ||
+                    event.button !== 0 ||
+                    event.metaKey ||
+                    event.ctrlKey ||
+                    event.shiftKey ||
+                    event.altKey
+                  ) {
+                    return;
+                  }
+                  if (tab.segment === "generate") {
+                    dispatch({ type: "generate_tab_opened" });
+                  } else if (tab.segment === "history") {
+                    dispatch({ type: "history_opened" });
+                  }
+                }}
                 className={cn(
                   "inline-flex items-center border-b-2 px-4 py-2.5 text-sm font-medium transition-colors",
                   isActive

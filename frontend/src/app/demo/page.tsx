@@ -46,7 +46,7 @@ export default function DemoAnalysisPage() {
 
       <ScrollReveal index={2}>
         <AnalysisCardBoundary resetKey={`${repoUrl}:commits`}>
-          <section className="space-y-3">
+          <section className="space-y-3" data-demo-target="commit-activity">
             <h2 className="text-base font-semibold">Commit activity</h2>
             <RepoCommitTimeline repoUrl={repoUrl} />
           </section>

@@ -240,6 +240,50 @@
   }
 }
 
+/* Demo walkthrough targets are marked in shared components but only activated by
+   the provider mounted under /demo. The outline never changes layout and remains
+   visible in both themes without obscuring the control underneath. */
+[data-demo-target][data-demo-active="true"] {
+  outline: 2px solid var(--brand);
+  outline-offset: 4px;
+  box-shadow: 0 0 0 7px color-mix(in srgb, var(--brand) 12%, transparent);
+  scroll-margin-block: 7rem 14rem;
+  transition:
+    outline-color 160ms cubic-bezier(0.23, 1, 0.32, 1),
+    box-shadow 160ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* The guide appears rarely and uses only compositor-friendly properties. Content
+   changes stay still so repeated walkthrough steps never feel sluggish. */
+.demo-walkthrough-panel {
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 180ms cubic-bezier(0.23, 1, 0.32, 1),
+    transform 180ms cubic-bezier(0.23, 1, 0.32, 1);
+
+  @starting-style {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-demo-target][data-demo-active="true"] {
+    transition: none;
+  }
+
+  .demo-walkthrough-panel {
+    transform: none;
+    transition: opacity 160ms ease-out;
+
+    @starting-style {
+      opacity: 0;
+      transform: none;
+    }
+  }
+}
+
 /* Base element defaults: token-driven border color and page background/text. */
 @layer base {
   * {

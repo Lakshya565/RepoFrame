@@ -43,6 +43,10 @@ import {
   demoGenerateProfile,
   demoVerifyClaims,
 } from "@/lib/demo-generation";
+import {
+  generationWalkthroughEvent,
+  useDemoWalkthrough,
+} from "@/lib/demo-walkthrough";
 
 type ProjectWriteupSectionProps = {
   repoUrl: string;
@@ -119,6 +123,7 @@ export function ProjectWriteupSection({
   // The signed-out demo: every generation call resolves from the frozen fixture
   // instead of OpenAI, and the context form + instruction boxes are login-gated.
   const demo = useDemo();
+  const { dispatch: dispatchWalkthrough } = useDemoWalkthrough();
 
   // Seed RepoFrame's "guess" context fields from free repo analysis (detected
   // stack -> technical focus, repo description -> purpose). Runs once per session
@@ -199,9 +204,10 @@ export function ProjectWriteupSection({
 
   // Leaves the Context step for Generate. Context is optional, so this advances
   // regardless of how much was filled in.
-  function handleContinueFromContext() {
+  function handleContinueFromContext(source: "added" | "repo_only") {
     setContextAcknowledged(true);
     setCurrentStep(2);
+    dispatchWalkthrough({ type: "context_continued", source });
   }
 
   // Returns the profile, regenerating it when the questionnaire changed since it
@@ -265,7 +271,9 @@ export function ProjectWriteupSection({
         ? await demoGenerateInterview()
         : await generateInterviewPrep(profileResponse.profile, allGuidance);
       setInterviewTopics(interviewResponse.topics);
+      dispatchWalkthrough(generationWalkthroughEvent("all", true));
     } catch (caught) {
+      dispatchWalkthrough(generationWalkthroughEvent("all", false));
       setError(messageOf(caught, "RepoFrame could not generate the writeup."));
     } finally {
       setBusyTask(null);
@@ -290,7 +298,9 @@ export function ProjectWriteupSection({
         : await generateOutputs(activeProfile, [section], guidance);
       setOutputs((current) => mergeSection(current, section, response.outputs));
       setBaseline(response.outputs, section);
+      dispatchWalkthrough(generationWalkthroughEvent(section, true));
     } catch (caught) {
+      dispatchWalkthrough(generationWalkthroughEvent(section, false));
       setError(messageOf(caught, "RepoFrame could not generate that section."));
     } finally {
       setBusyTask(null);
@@ -364,7 +374,9 @@ export function ProjectWriteupSection({
         ? await demoGenerateInterview()
         : await generateInterviewPrep(activeProfile, guidance);
       setInterviewTopics(response.topics);
+      dispatchWalkthrough(generationWalkthroughEvent("interview", true));
     } catch (caught) {
+      dispatchWalkthrough(generationWalkthroughEvent("interview", false));
       setError(messageOf(caught, "RepoFrame could not generate interview prep."));
     } finally {
       setBusyTask(null);
@@ -439,7 +451,9 @@ export function ProjectWriteupSection({
         : await verifyClaimsStream(repoUrl, context, outputs, { onProgress });
       setVerifications(response.verifications);
       setVerifyInvestigation(response.investigation);
+      dispatchWalkthrough({ type: "audit_finished", succeeded: true });
     } catch (caught) {
+      dispatchWalkthrough({ type: "audit_finished", succeeded: false });
       setError(messageOf(caught, "RepoFrame could not verify the claims."));
     } finally {
       setBusyTask(null);
@@ -538,7 +552,7 @@ export function ProjectWriteupSection({
 type ContextStepProps = {
   context: Parameters<typeof UserContextForm>[0]["context"];
   onContextChange: Parameters<typeof UserContextForm>[0]["onContextChange"];
-  onContinue: () => void;
+  onContinue: (source: "added" | "repo_only") => void;
   seeding: boolean;
 };
 
@@ -560,11 +574,14 @@ function ContextStep({
         seeding={seeding}
       />
       <div className="space-y-3">
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <Button variant="brand" onClick={onContinue}>
+        <div
+          className="flex flex-col gap-3 sm:flex-row"
+          data-demo-target="context-actions"
+        >
+          <Button variant="brand" onClick={() => onContinue("added")}>
             Continue with added context
           </Button>
-          <Button variant="outline" onClick={onContinue}>
+          <Button variant="outline" onClick={() => onContinue("repo_only")}>
             Continue with repo evidence only
           </Button>
         </div>
@@ -641,6 +658,7 @@ function GenerateEverythingCard({
       )}
 
       <Button
+        data-demo-target="generation-actions"
         variant="brand"
         className="mt-3"
         disabled={busy}

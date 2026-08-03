@@ -7,6 +7,8 @@ import { DemoModeProvider } from "@/lib/demo-mode";
 import { DEMO_REPO_NAME, DEMO_REPO_OWNER } from "@/lib/demo-fixture";
 import { DEMO_REPO_URL } from "@/lib/demo-fixture";
 import { AnalysisProvider } from "@/lib/analysis-context";
+import { DemoWalkthroughProvider } from "@/lib/demo-walkthrough";
+import { DemoWalkthroughGuide } from "@/components/demo-walkthrough-guide";
 
 // The signed-out demo: a full, interactive replica of the analysis experience
 // (Analysis / Generate / History tabs) for RepoFrame's own repo, wrapped in
@@ -20,17 +22,20 @@ export default function DemoLayout({ children }: { children: ReactNode }) {
     <main className="flex min-h-screen flex-col">
       <SiteHeader />
       <DemoModeProvider>
-        <GenerationProvider>
-          <AnalysisProvider repoUrl={DEMO_REPO_URL} analysisPath="/demo">
-            <AnalysisChrome
-              owner={DEMO_REPO_OWNER}
-              repo={DEMO_REPO_NAME}
-              basePath="/demo"
-            >
-              {children}
-            </AnalysisChrome>
-          </AnalysisProvider>
-        </GenerationProvider>
+        <DemoWalkthroughProvider>
+          <GenerationProvider>
+            <AnalysisProvider repoUrl={DEMO_REPO_URL} analysisPath="/demo">
+              <AnalysisChrome
+                owner={DEMO_REPO_OWNER}
+                repo={DEMO_REPO_NAME}
+                basePath="/demo"
+              >
+                {children}
+              </AnalysisChrome>
+            </AnalysisProvider>
+          </GenerationProvider>
+          <DemoWalkthroughGuide />
+        </DemoWalkthroughProvider>
       </DemoModeProvider>
     </main>
   );

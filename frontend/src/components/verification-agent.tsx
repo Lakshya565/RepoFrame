@@ -98,7 +98,12 @@ export function VerificationAgent({
         </div>
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
-          <Button variant="brand" disabled={!canRun} onClick={onRun}>
+          <Button
+            data-demo-target="audit-run"
+            variant="brand"
+            disabled={!canRun}
+            onClick={onRun}
+          >
             {running ? (
               <>
                 <Loader2
