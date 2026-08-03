@@ -26,9 +26,9 @@ const ZERO_USAGE: UsageTotals = {
 
 // The first generation "reads the project", so it lingers a beat longer than the
 // follow-ups — mirroring the real flow's slower first call. All tunable here.
-export const DEMO_PROFILE_DELAY_MS = 1600;
-export const DEMO_GENERATE_DELAY_MS = 1300;
-export const DEMO_VERIFY_STEP_MS = 900;
+export const DEMO_PROFILE_DELAY_MS = 4000;
+export const DEMO_GENERATE_DELAY_MS = 5000;
+export const DEMO_VERIFY_STEP_MS = 2000;
 
 // The frozen writeup, with the null-safe fallbacks the ProjectDetail type allows.
 const DEMO_PROFILE = DEMO_PROJECT.profile as ProjectProfileData;
