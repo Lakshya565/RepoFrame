@@ -11,10 +11,9 @@ import requests
 
 from app import config
 
-# The GitHub App side of Phase 15 auth: everything needed to act AS the RepoFrame
+# The GitHub App service: everything needed to act AS the RepoFrame
 # GitHub App and mint the short-lived, per-installation tokens that read a user's
-# repos. This is deliberately separate from identity (Supabase) — see
-# PHASE_15_PLAN.md §2. Key properties:
+# repos. This is deliberately separate from identity (Supabase). Key properties:
 #   * The App private key signs ~9-minute "app JWTs" (RS256). It is backend-only,
 #     read from env (inline or a .pem path), never logged or returned.
 #   * Installation tokens stay backend-only. repo_access may retain them in process
@@ -54,6 +53,8 @@ class InstallationAccount:
     account_id: int
     login: str
     repo_selection: str
+    account_type: str = "User"
+    settings_url: str = ""
 
 
 # A freshly minted installation token and when it expires (ISO-8601 from GitHub).
@@ -187,6 +188,12 @@ def get_installation_account(
         account_id=int(account["id"]),
         login=str(account.get("login", "")),
         repo_selection=str(body.get("repository_selection", "all")),
+        account_type=(
+            str(account.get("type"))
+            if account.get("type") in {"User", "Organization"}
+            else "User"
+        ),
+        settings_url=str(body.get("html_url", "")),
     )
 
 

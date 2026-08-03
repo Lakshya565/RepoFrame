@@ -4,6 +4,8 @@ from unittest.mock import patch
 from app import config
 from app.services import (
     github_app,
+    github_authorization_store,
+    github_oauth,
     github_service,
     installation_store,
     repo_access,
@@ -46,6 +48,7 @@ class ResolveInstallationTokenTests(unittest.TestCase):
             patch.object(config, "GITHUB_APP_PRIVATE_KEY", "key"),
             patch.object(config, "SUPABASE_URL", "https://ref.supabase.co"),
             patch.object(config, "SUPABASE_SERVICE_ROLE_KEY", "svc"),
+            patch.object(github_oauth, "is_configured", return_value=True),
         ]
         for p in self._cfg:
             p.start()
@@ -59,8 +62,18 @@ class ResolveInstallationTokenTests(unittest.TestCase):
         store = installation_store.InMemoryInstallationRepository()
         if record is not None:
             store.upsert(record)
-        return patch.object(
-            installation_store, "get_installation_repository", return_value=store
+        authorization_store = (
+            github_authorization_store.InMemoryGitHubAuthorizationRepository()
+        )
+        return (
+            patch.object(
+                installation_store, "get_installation_repository", return_value=store
+            ),
+            patch.object(
+                github_authorization_store,
+                "get_github_authorization_repository",
+                return_value=authorization_store,
+            ),
         )
 
     def test_none_when_no_user(self) -> None:
@@ -73,33 +86,42 @@ class ResolveInstallationTokenTests(unittest.TestCase):
             )
 
     def test_none_when_no_installation(self) -> None:
-        with self._with_installation(None):
+        installation_patch, authorization_patch = self._with_installation(None)
+        with installation_patch, authorization_patch, patch.object(
+            github_oauth, "get_valid_access_token", return_value="ghu_user"
+        ):
             self.assertIsNone(
                 repo_access.resolve_installation_token(self.user, "octo", "repo")
             )
 
     def test_token_when_repo_in_installation(self) -> None:
         record = InstallationRecord("u1", 42, 999, "octo", "selected")
-        with self._with_installation(record), patch.object(
-            github_app, "mint_installation_token", return_value=InstallationToken("ghs_x", "")
+        installation_patch, authorization_patch = self._with_installation(record)
+        with installation_patch, authorization_patch, patch.object(
+            github_oauth, "get_valid_access_token", return_value="ghu_user"
         ), patch.object(
-            github_app,
-            "list_installation_repositories",
-            return_value=[{"full_name": "octo/repo"}],
+            github_oauth,
+            "list_user_installation_repositories",
+            return_value=frozenset({"octo/repo"}),
+        ), patch.object(
+            github_app, "mint_installation_token", return_value=InstallationToken("ghs_x", "")
         ):
             token = repo_access.resolve_installation_token(self.user, "octo", "repo")
         self.assertEqual(token, "ghs_x")
 
     def test_reuses_unexpired_token_and_repository_list(self) -> None:
         record = InstallationRecord("u1", 42, 999, "octo", "selected")
-        with self._with_installation(record), patch.object(
+        installation_patch, authorization_patch = self._with_installation(record)
+        with installation_patch, authorization_patch, patch.object(
+            github_oauth, "get_valid_access_token", return_value="ghu_user"
+        ), patch.object(
             github_app,
             "mint_installation_token",
             return_value=InstallationToken("ghs_x", ""),
         ) as mint, patch.object(
-            github_app,
-            "list_installation_repositories",
-            return_value=[{"full_name": "octo/repo"}],
+            github_oauth,
+            "list_user_installation_repositories",
+            return_value=frozenset({"octo/repo"}),
         ) as list_repositories:
             first = repo_access.resolve_installation_token(
                 self.user, "octo", "repo"
@@ -111,16 +133,19 @@ class ResolveInstallationTokenTests(unittest.TestCase):
         self.assertEqual(first, "ghs_x")
         self.assertEqual(second, "ghs_x")
         mint.assert_called_once_with(42)
-        list_repositories.assert_called_once_with("ghs_x")
+        list_repositories.assert_called_once_with("ghu_user", 42)
 
     def test_none_when_repo_not_in_installation(self) -> None:
         record = InstallationRecord("u1", 42, 999, "octo", "selected")
-        with self._with_installation(record), patch.object(
-            github_app, "mint_installation_token", return_value=InstallationToken("ghs_x", "")
+        installation_patch, authorization_patch = self._with_installation(record)
+        with installation_patch, authorization_patch, patch.object(
+            github_oauth, "get_valid_access_token", return_value="ghu_user"
         ), patch.object(
-            github_app,
-            "list_installation_repositories",
-            return_value=[{"full_name": "octo/other"}],
+            github_oauth,
+            "list_user_installation_repositories",
+            return_value=frozenset({"octo/other"}),
+        ), patch.object(
+            github_app, "mint_installation_token", return_value=InstallationToken("ghs_x", "")
         ):
             token = repo_access.resolve_installation_token(self.user, "octo", "repo")
         self.assertIsNone(token)

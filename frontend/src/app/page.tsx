@@ -28,7 +28,7 @@ const STEP_CONNECTOR_THICKNESS_PX = 2;
 const STEPS = [
   {
     title: "Paste a repository URL",
-    body: "Use the HTTPS clone or browser URL of any public GitHub repository.",
+    body: "Use a GitHub browser or HTTPS clone URL. Signed-in users can connect personal or organization repositories.",
   },
   {
     title: "RepoFrame reads the evidence",

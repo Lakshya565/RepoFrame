@@ -1,44 +1,109 @@
 import {
   API_BASE_URL,
-  authHeaders,
+  fetchWithAuthRetry,
   parseJsonResponse,
+  throwResponseError,
 } from "@/lib/api-client";
 
-// Frontend client for the GitHub App connection endpoints (backend Phase 15.4).
-// Authenticated with the Supabase JWT: the backend binds the installation to the
-// signed-in user only if the GitHub account matches (ownership check).
+export type GitHubInstallation = {
+  installationId: number;
+  accountLogin: string;
+  accountType: "User" | "Organization";
+  repoSelection: string;
+  settingsUrl: string;
+};
 
-// Public GitHub App slug, used to build the install URL (Phase 15.6).
-const GITHUB_APP_SLUG = process.env.NEXT_PUBLIC_GITHUB_APP_SLUG ?? "";
+export type GitHubConnections = {
+  status: "connected" | "not_connected" | "reauthorization_required";
+  installations: GitHubInstallation[];
+};
 
-// The GitHub "install this App" URL, with the user id as state so the post-install
-// landing can associate it. null when the slug isn't configured (feature off).
-// GitHub's own screen is where the user picks All vs Selected repositories.
-export function installAppUrl(userId: string): string | null {
-  if (!GITHUB_APP_SLUG) {
-    return null;
-  }
-  return `https://github.com/apps/${GITHUB_APP_SLUG}/installations/new?state=${encodeURIComponent(userId)}`;
-}
+export type CompleteGitHubInstall = GitHubConnections & {
+  returnTo: string;
+  nextUrl: string | null;
+  state: string | null;
+};
 
-// The stored connection: which installation, whose account, and the repo scope.
+export type GitHubConnectionStart = {
+  authorizationUrl: string | null;
+  installUrl: string | null;
+  state: string;
+  codeVerifier: string | null;
+};
+
 export type Connection = {
   installationId: number;
   accountLogin: string;
   repoSelection: string;
 };
 
-// Bind a just-completed App installation to the current user. Called by the
-// /github/installed landing after GitHub redirects back with an installation_id.
+export async function getGitHubConnections(): Promise<GitHubConnections> {
+  const response = await fetchWithAuthRetry(
+    `${API_BASE_URL}/api/github/connections`,
+  );
+  return parseJsonResponse(
+    response,
+    "RepoFrame could not check your GitHub connection.",
+  );
+}
+
+export async function startGitHubInstall(
+  returnTo = "/",
+  forceInstall = false,
+): Promise<GitHubConnectionStart> {
+  const response = await fetchWithAuthRetry(
+    `${API_BASE_URL}/api/github/install/start`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ returnTo, forceInstall }),
+    },
+  );
+  return parseJsonResponse<GitHubConnectionStart>(
+    response,
+    "RepoFrame could not start the GitHub connection.",
+  );
+}
+
+export async function completeGitHubInstall(
+  code: string,
+  state: string,
+  codeVerifier?: string | null,
+): Promise<CompleteGitHubInstall> {
+  const response = await fetchWithAuthRetry(
+    `${API_BASE_URL}/api/github/install/complete`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, state, codeVerifier }),
+    },
+  );
+  return parseJsonResponse(
+    response,
+    "RepoFrame could not finish the GitHub connection.",
+  );
+}
+
+export async function disconnectGitHub(): Promise<void> {
+  const response = await fetchWithAuthRetry(
+    `${API_BASE_URL}/api/github/authorization`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    await throwResponseError(
+      response,
+      "RepoFrame could not disconnect GitHub.",
+    );
+  }
+}
+
+// One-release compatibility with a backend/frontend deployment mismatch.
 export async function connectInstallation(
   installationId: number,
 ): Promise<Connection> {
-  const response = await fetch(`${API_BASE_URL}/api/github/install`, {
+  const response = await fetchWithAuthRetry(`${API_BASE_URL}/api/github/install`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(await authHeaders()),
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ installationId }),
   });
   return parseJsonResponse(

@@ -11,14 +11,14 @@ export default function SavedPage() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-xl font-semibold tracking-tight">
-              Saved projects
+              History
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Your saved repo analyses. Open one to revisit it, or delete what you
+              Your saved repository analyses. Open one to revisit it, or delete what you
               no longer need.
             </p>
           </div>
-          {/* Connect the GitHub App to analyze private repos (Phase 15.6). */}
+          {/* Repository authorization stays visible alongside saved work. */}
           <ConnectReposButton className="shrink-0" />
         </div>
         <div className="mt-6">

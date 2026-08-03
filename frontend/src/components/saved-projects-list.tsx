@@ -130,7 +130,7 @@ export function SavedProjectsList() {
   if (status !== "signedIn") {
     return (
       <Card className="p-8 text-center text-sm text-muted-foreground">
-        Log in with GitHub to see your saved analyses.
+        Continue with GitHub to see your saved analyses.
       </Card>
     );
   }

@@ -21,7 +21,7 @@ type GateOverlayProps = {
 // A login gate for the demo: it shows the real feature behind a blur + dim and
 // floats a call-to-action over it, so a visitor sees exactly what unlocking gets
 // them without the demo ever calling an API. The CTA is auth-aware:
-//   - signed out → "Log in with GitHub" (the whole point of the gate).
+//   - signed out → "Continue with GitHub" (the whole point of the gate).
 //   - signed in  → a wry "Why are you here?" nudging them back to the real app,
 //     since the frozen demo is pointless once you can analyze your own repos.
 // The children stay in the layout (so the card keeps its real height) but are
@@ -75,7 +75,7 @@ export function GateOverlay({ children, title, className }: GateOverlayProps) {
                 onClick={() => void signInWithGitHub()}
               >
                 <GithubMark />
-                Log in with GitHub
+                Continue with GitHub
               </Button>
             </>
           )}

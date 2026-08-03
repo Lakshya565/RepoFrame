@@ -223,9 +223,17 @@ always scoped by the verified user ID in backend queries. A saved project contai
 metadata, user context, profile, outputs, interview prep, guidance, and audit results.
 
 Added GitHub OAuth through Supabase for identity and a separate GitHub App for
-fine-grained repository access. The App uses short-lived installation tokens, supports
-selected repositories, verifies installation ownership, and provides an HMAC-verified
-webhook handler for installation changes.
+fine-grained repository access. The final connection flow presents one Continue with
+GitHub entry point: returning users reuse their connection, while first-time users are
+guided through App installation and user authorization. One RepoFrame user can connect
+multiple personal and organization installations.
+
+GitHub App user access and refresh tokens are encrypted before backend-only Supabase
+storage. For every private-repository analysis, GitHub's user-installation repository
+endpoint confirms that the signed-in person still has access before RepoFrame mints a
+short-lived installation token. This prevents a stale organization mapping from
+surviving membership removal. The HMAC-verified webhook removes deleted installations
+and revoked user authorizations.
 
 Key decisions:
 
@@ -233,7 +241,8 @@ Key decisions:
   different problems.
 - Keep service-role and App secrets backend-only.
 - Scope every database operation in code even with Row Level Security as defense in depth.
-- Never persist installation tokens.
+- Never persist installation tokens; encrypt the longer-lived user authorization needed
+  to revalidate organization membership.
 
 ## Phase 16 — Launch readiness
 

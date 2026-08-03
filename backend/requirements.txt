@@ -26,3 +26,5 @@ supabase>=2.0.0,<3.0.0
 # future supabase change could silently break Phase 15 auth. The [crypto] extra
 # pulls in `cryptography`, which the asymmetric algorithms require.
 PyJWT[crypto]==2.13.0
+# Imported directly for Fernet encryption of persisted GitHub user tokens.
+cryptography==49.0.0

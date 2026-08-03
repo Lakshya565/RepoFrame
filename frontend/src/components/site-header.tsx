@@ -1,5 +1,6 @@
 import { AuthButton } from "@/components/auth-button";
 import { HomeButton } from "@/components/home-button";
+import { HistoryLink } from "@/components/history-link";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 // Slim top bar shared across pages: the Home control (left) and, on the right, the
@@ -14,6 +15,7 @@ export function SiteHeader() {
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-5 sm:px-8">
         <HomeButton />
         <div className="flex items-center gap-2">
+          <HistoryLink />
           <AuthButton />
           <ThemeToggle />
         </div>

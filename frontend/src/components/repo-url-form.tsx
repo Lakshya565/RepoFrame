@@ -16,6 +16,7 @@ import { HoverPopIcon } from "@/components/hover-pop-icon";
 import { Input } from "@/components/ui/input";
 import { GlowText } from "@/components/glow-text";
 import { cn } from "@/lib/utils";
+import { ConnectReposButton } from "@/components/connect-repos-button";
 
 // A repo the user is about to analyze that already exists in their History.
 type DuplicateMatch = {
@@ -124,7 +125,7 @@ export function RepoUrlForm() {
             onClick={() => void signInWithGitHub()}
           >
             <GithubMark />
-            Log in with GitHub
+            Continue with GitHub
           </Button>
           <Link
             href="/demo"
@@ -211,10 +212,13 @@ export function RepoUrlForm() {
           </p>
         ) : (
           <p className="text-muted-foreground" id="repo-url-help">
-            <GlowText text="Use the HTTPS clone or browser URL of any public GitHub repository." />
+            <GlowText text="Use a GitHub browser or HTTPS clone URL. Connect GitHub for private and organization repositories." />
           </p>
         )}
       </div>
+      {status === "signedIn" ? (
+        <ConnectReposButton className="mt-1" />
+      ) : null}
       </form>
     </>
   );

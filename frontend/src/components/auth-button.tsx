@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/lib/auth-context";
 
 // The header's sign-in control. It mirrors the four auth states: nothing when
-// Supabase is unconfigured (local dev), a skeleton while resolving, a "Log in with
+// Supabase is unconfigured (local dev), a skeleton while resolving, a "Continue with
 // GitHub" button when signed out, and the GitHub handle + "Log out" when signed
 // in. Login/logout themselves live in the auth context; this is just the surface.
 
@@ -115,7 +115,7 @@ export function AuthButton() {
       <HoverPopIcon>
         <GithubMark />
       </HoverPopIcon>
-      Log in with GitHub
+      Continue with GitHub
     </Button>
   );
 }

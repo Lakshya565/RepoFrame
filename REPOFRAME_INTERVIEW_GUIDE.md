@@ -271,7 +271,9 @@ Repository URL
 
 > The analysis code does not care where the credential came from. A repository-access
 > service first decides whether the request can use public access or needs a GitHub App
-> installation token. It then places that short-lived token into the GitHub request
+> installation token. For private repos, it first uses an encrypted GitHub user
+> authorization to confirm the person still has access to that personal or organization
+> installation. It then places a short-lived installation token into the GitHub request
 > context and runs the same analysis services.
 
 **Likely follow-up:** How do you keep private data out of public caches?
@@ -281,7 +283,8 @@ Repository URL
 > Public cache keys are repository-scoped. Private cache keys include the verified
 > user, GitHub installation, and repository. The frontend also clears its private
 > session cache on sign-out. Installation tokens are never persisted and are removed
-> before their reported expiry.
+> before their reported expiry. The user authorization needed to recheck membership is
+> encrypted before it is stored.
 
 **Evidence in the code:** `backend/app/services/repo_access.py`,
 `analysis_service.py`, `github_app.py`,
@@ -653,27 +656,32 @@ Repository URL
 
 > OAuth answers “who is this user?” The GitHub App answers “which repositories may
 > RepoFrame read?” Keeping them separate gives selected-repository access and
-> short-lived tokens instead of asking users for a broad personal access token.
+> short-lived tokens instead of asking users for a broad personal access token. The UI
+> still presents this as one Continue with GitHub flow.
 
-**Likely follow-up:** Why not store one user token?
+**Likely follow-up:** Why store a GitHub App user token at all?
 
 **Deeper answer**
 
-> Long-lived user tokens increase the impact of a leak and can carry broader scopes.
-> GitHub App installation tokens are fine-grained, expire quickly, and can be revoked by
-> uninstalling the App or changing repository selection.
+> I need the user token to ask GitHub which installations and repositories that person
+> can still access, especially for organizations. I encrypt the user and refresh tokens
+> at rest, keep expiring tokens enabled, and never use that token as a replacement for
+> the repository-scoped installation token. Actual repository reads still use a
+> short-lived installation token.
 
 **Evidence in the code:** `backend/app/services/github_app.py`,
-`repo_access.py`, `installation_store.py`.
+`github_oauth.py`, `github_authorization_store.py`, `repo_access.py`,
+`installation_store.py`.
 
 ### How are secrets protected?
 
 **Answer I would give**
 
-> Only the API base URL, Supabase public URL/key, and GitHub App slug are exposed to
-> the frontend. OpenAI keys, the Supabase service-role key, the GitHub App private key,
-> and webhook secret exist only in backend environment variables. Tokens are not
-> logged or stored in saved projects.
+> Only the API base URL and Supabase public URL/key are exposed to the frontend. OpenAI
+> keys, the Supabase service-role key, GitHub App credentials, state-signing secret, and
+> token-encryption key exist only in backend environment variables. Tokens are not
+> logged or stored in saved projects, and GitHub user tokens are encrypted in their own
+> backend-only table.
 
 **Likely follow-up:** What about private repo content in caches?
 

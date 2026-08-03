@@ -266,7 +266,8 @@ def fetch_repo_metadata(
 
     if response.status_code == 404:
         raise GitHubMetadataError(
-            "GitHub could not find that public repository.",
+            "GitHub could not access that repository. Check the URL, or connect "
+            "GitHub and include the repository if it is private.",
             404,
         )
 

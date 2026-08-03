@@ -16,7 +16,7 @@ from app.services.repo_parser import RepoUrlParseError, parse_github_repo_url
 # here. Everything downstream (project storage, per-user quotas, GitHub App
 # installation ownership) keys off the user_id this module returns.
 #
-# Verification model (see PHASE_15_PLAN.md §15.1):
+# Verification supports modern asymmetric Supabase JWTs and the legacy shared-secret path:
 #   * Primary path — ASYMMETRIC (ES256/RS256). The target project signs tokens
 #     with a private key it never reveals; we verify against its PUBLIC keys,
 #     fetched from the project's JWKS discovery endpoint (derived from
@@ -193,7 +193,7 @@ def require_user(
 def require_user_when_configured(
     authorization: str | None = Header(default=None),
 ) -> AuthenticatedUser | None:
-    """Login gate honoring the two signed-out states (see PHASE_15_PLAN.md §1).
+    """Login gate honoring configured hosted auth and open local development.
 
     This is the dependency the live analyze / generate / verify routes use:
       * Supabase UNCONFIGURED (local dev / self-host): returns None and the

@@ -98,8 +98,12 @@ Key backend settings:
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Backend-only database credential |
 | `GITHUB_APP_ID` | GitHub App identity |
+| `GITHUB_APP_SLUG` | Builds the public installation URL |
+| `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET` | Exchanges GitHub App user-authorization codes |
 | `GITHUB_APP_PRIVATE_KEY` or `GITHUB_APP_PRIVATE_KEY_PATH` | Signs App JWTs |
 | `GITHUB_APP_WEBHOOK_SECRET` | Verifies installation webhooks |
+| `GITHUB_APP_STATE_SECRET` | Signs the install/authorization browser round trip |
+| `GITHUB_USER_TOKEN_ENCRYPTION_KEY` | Encrypts GitHub user and refresh tokens at rest |
 | `CORS_ALLOW_ORIGINS` | Comma-separated allowed frontend origins |
 | `MAX_LLM_CALLS_PER_USER_PER_DAY` | Per-user paid-call quota |
 | `MAX_LLM_CALLS_PER_DAY` | Global paid-call quota |
@@ -120,16 +124,22 @@ Create `frontend/.env.local` when using hosted auth/backend services:
 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
-NEXT_PUBLIC_GITHUB_APP_SLUG=
 ```
 
-These four values are intentionally browser-visible. OpenAI, Supabase service-role,
+These three values are intentionally browser-visible. OpenAI, Supabase service-role,
 GitHub App private-key, and webhook secrets are backend-only.
 
 If Supabase is not configured, RepoFrame keeps a public-repository local-development
 flow and uses a git-ignored local token ledger. When Supabase is configured,
 authentication, saved projects, private-repository access, persistent usage, and paid
 call quotas become active.
+
+The connection flow follows GitHub's user-token boundary: it authorizes the signed-in
+person first, reuses personal or organization installations they can already access,
+and opens the installation picker only when needed. Repository reads still use a
+short-lived installation token. See GitHub's documentation for
+[GitHub App user access tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
+and [user-accessible installations](https://docs.github.com/en/rest/apps/installations).
 
 ## API overview
 
@@ -169,12 +179,18 @@ usage recording.
 
 - `GET/POST /api/projects`
 - `GET/DELETE /api/projects/{project_id}`
+- `GET /api/github/connections`
+- `POST /api/github/install/start`
+- `POST /api/github/install/complete`
+- `DELETE /api/github/authorization`
 - `POST /api/github/install`
 - `POST /api/github/webhook`
 - `GET /api/usage/total`
 - `GET /api/metrics`
 
-Project and GitHub App routes are scoped by the verified Supabase identity. Backend
+`POST /api/github/install` is a temporary compatibility route for deployment skew;
+new clients use the signed OAuth-on-install flow. Project and GitHub App routes are
+scoped by the verified Supabase identity. Backend
 usage and metrics remain available even though no developer metrics panel is shown in
 the product UI.
 
@@ -186,6 +202,8 @@ the product UI.
 - Public and private repositories use different cache scopes.
 - GitHub ETags avoid downloading unchanged resources.
 - GitHub App tokens stay in memory and expire before GitHub's reported deadline.
+- Encrypted GitHub user tokens prove current access to personal and organization
+  installations; membership loss cannot be bypassed by a stale database mapping.
 - Frontend session caches hold at most ten repositories and clear private data on sign-out.
 - Commit statistics are deferred, retried when GitHub is still computing, and cached.
 - The repository tree lazy-mounts and renders only expanded branches.
@@ -228,14 +246,34 @@ OAuth dashboard settings, webhook activation, or external service availability.
 ### Frontend
 
 - Set `NEXT_PUBLIC_API_BASE_URL` to the deployed backend.
-- Set the public Supabase URL/key and GitHub App slug.
+- Set the public Supabase URL and anonymous key.
 - Deploy the `frontend` directory to Vercel.
 
 ### External dashboard checks
 
 - Supabase Site URL and redirect allowlist include the production frontend.
 - Supabase's GitHub provider has the current OAuth client ID and secret.
-- The GitHub App Setup URL points to `/github/installed`.
+- Apply `supabase/migrations/0003_github_multi_install.sql` before deploying this backend.
+- In the GitHub App, enable **Request user authorization (OAuth) during installation**.
+- Set the GitHub App's first callback URL to
+  `https://<frontend-host>/github/installed`. GitHub uses this instead of a Setup URL
+  when OAuth-on-install is enabled.
+- Generate a GitHub App client secret and copy its client ID/secret to the backend.
+- Keep expiring GitHub user tokens enabled so refresh tokens rotate normally.
 - The GitHub App webhook points to `/api/github/webhook` and uses the configured secret.
+- The GitHub App has only the read permissions RepoFrame needs (repository metadata
+  and contents); do not add a broad OAuth `repo` scope.
 - A signed-in user can analyze, generate, audit, save, reopen, and access an authorized
-  private repository.
+  personal and organization private repository.
+
+Generate the two new backend secrets locally (once), then store the outputs in Render:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(48))"
+.\.venv\Scripts\python.exe -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Use the first output for `GITHUB_APP_STATE_SECRET` and the second for
+`GITHUB_USER_TOKEN_ENCRYPTION_KEY`. Changing the Fernet key later makes existing
+stored authorizations unreadable and requires users to reconnect.

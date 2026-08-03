@@ -166,6 +166,18 @@ GITHUB_APP_PRIVATE_KEY: str = os.getenv("GITHUB_APP_PRIVATE_KEY", "")
 GITHUB_APP_PRIVATE_KEY_PATH: str = os.getenv("GITHUB_APP_PRIVATE_KEY_PATH", "")
 GITHUB_APP_WEBHOOK_SECRET: str = os.getenv("GITHUB_APP_WEBHOOK_SECRET", "")
 
+# OAuth-on-install credentials let the callback prove which personal and
+# organization installations the signed-in GitHub user can access. User tokens
+# are encrypted before persistence; signed state binds the browser round trip to
+# the verified Supabase user without exposing their id in the install URL.
+GITHUB_APP_CLIENT_ID: str = os.getenv("GITHUB_APP_CLIENT_ID", "")
+GITHUB_APP_CLIENT_SECRET: str = os.getenv("GITHUB_APP_CLIENT_SECRET", "")
+GITHUB_APP_SLUG: str = os.getenv("GITHUB_APP_SLUG", "")
+GITHUB_APP_STATE_SECRET: str = os.getenv("GITHUB_APP_STATE_SECRET", "")
+GITHUB_USER_TOKEN_ENCRYPTION_KEY: str = os.getenv(
+    "GITHUB_USER_TOKEN_ENCRYPTION_KEY", ""
+)
+
 
 # ============================================================
 # CORS allowed origins (Phase 16.4 — deployment)

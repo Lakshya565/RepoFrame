@@ -28,12 +28,19 @@ class InMemoryInstallationRepositoryTests(unittest.TestCase):
         self.assertEqual(self.repo.get_by_user("user-1").installation_id, 42)
         self.assertEqual(self.repo.get_by_installation(42).user_id, "user-1")
 
-    def test_upsert_overwrites_same_user(self) -> None:
+    def test_one_user_can_hold_multiple_installations(self) -> None:
         self.repo.upsert(_record(installation=42))
         self.repo.upsert(_record(installation=77, selection="selected"))
-        record = self.repo.get_by_user("user-1")
-        self.assertEqual(record.installation_id, 77)
-        self.assertEqual(record.repo_selection, "selected")
+        records = self.repo.list_by_user("user-1")
+        self.assertEqual([record.installation_id for record in records], [42, 77])
+        self.assertEqual(records[1].repo_selection, "selected")
+
+    def test_same_installation_can_map_to_multiple_org_members(self) -> None:
+        self.repo.upsert(_record(user="user-1", installation=42))
+        self.repo.upsert(_record(user="user-2", installation=42))
+        self.assertEqual(len(self.repo.list_by_installation(42)), 2)
+        self.assertTrue(self.repo.delete_user_installation("user-1", 42))
+        self.assertEqual(self.repo.get_by_installation(42).user_id, "user-2")
 
     def test_get_missing_returns_none(self) -> None:
         self.assertIsNone(self.repo.get_by_user("nobody"))

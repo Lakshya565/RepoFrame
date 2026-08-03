@@ -32,7 +32,7 @@ type AuthContextValue = {
   configured: boolean;
   user: User | null;
   session: Session | null;
-  signInWithGitHub: () => Promise<void>;
+  signInWithGitHub: (returnTo?: string) => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -78,15 +78,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [configured]);
 
-  // Start the GitHub OAuth flow, returning the user to the page they left from.
-  const signInWithGitHub = useCallback(async () => {
+  // Supabase remains the identity provider. After login, the dedicated connection
+  // page checks GitHub App access and only opens installation when it is missing.
+  const signInWithGitHub = useCallback(async (returnTo?: string) => {
     const supabase = getSupabaseClient();
     if (!supabase) {
       return;
     }
+    const currentPath = `${window.location.pathname}${window.location.search}`;
+    const destination = returnTo ?? currentPath;
+    const callback = new URL("/github/connect", window.location.origin);
+    callback.searchParams.set("returnTo", destination);
     await supabase.auth.signInWithOAuth({
       provider: "github",
-      options: { redirectTo: window.location.origin },
+      options: { redirectTo: callback.toString() },
     });
   }, []);
 
