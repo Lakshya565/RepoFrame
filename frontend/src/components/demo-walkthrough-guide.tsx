@@ -112,7 +112,7 @@ export function DemoWalkthroughGuide() {
         <div className="mt-4 flex flex-wrap gap-2">
           <Button
             className="transition-[color,background-color,transform] duration-150 active:scale-[0.97]"
-            onClick={() => void signInWithGitHub("/")}
+            onClick={() => void signInWithGitHub()}
             size="sm"
             variant="brand"
           >

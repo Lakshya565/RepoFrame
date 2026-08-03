@@ -78,15 +78,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [configured]);
 
-  // Supabase remains the identity provider. After login, the dedicated connection
-  // page checks GitHub App access and only opens installation when it is missing.
+  // Supabase remains the identity provider. Ordinary sign-ins return Home; the
+  // optional return path is reserved for restoring an interrupted GitHub App
+  // callback, whose one-time authorization code must finish on its original URL.
   const signInWithGitHub = useCallback(async (returnTo?: string) => {
     const supabase = getSupabaseClient();
     if (!supabase) {
       return;
     }
-    const currentPath = `${window.location.pathname}${window.location.search}`;
-    const destination = returnTo ?? currentPath;
+    const destination = returnTo ?? "/";
     const callback = new URL("/github/connect", window.location.origin);
     callback.searchParams.set("returnTo", destination);
     await supabase.auth.signInWithOAuth({
