@@ -1,6 +1,8 @@
 import type { UserContext } from "@/lib/user-context";
 import {
+  combineLegacyCommitActivity,
   parseCommitActivityPayload,
+  type CommitActivityRange,
   type CommitActivityResponse,
 } from "@/lib/commit-activity";
 import {
@@ -288,7 +290,26 @@ export async function fetchCommitActivity(
     repoUrl,
     "RepoFrame could not fetch commit activity.",
   );
-  return parseCommitActivityPayload(payload);
+  const parsed = parseCommitActivityPayload(payload);
+  if (parsed.kind === "bundled") {
+    return parsed.data;
+  }
+
+  // A frontend and backend deployment can briefly expose the former endpoint,
+  // which returns only one requested range. Fetch exactly the missing timeline
+  // and normalize it into the current bundled shape before caching or rendering.
+  const missingRange: CommitActivityRange =
+    parsed.data.range === "year" ? "month" : "year";
+  const fallbackPayload = await postJson<unknown>(
+    "/api/repo/commit-activity",
+    { repoUrl, range: missingRange },
+    "RepoFrame could not fetch commit activity.",
+  );
+  const fallback = parseCommitActivityPayload(fallbackPayload);
+  if (fallback.kind === "bundled") {
+    return fallback.data;
+  }
+  return combineLegacyCommitActivity(parsed.data, fallback.data);
 }
 
 // GitHub computes its /stats/* endpoints lazily and returns "still computing" (which

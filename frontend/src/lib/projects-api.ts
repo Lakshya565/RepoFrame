@@ -8,7 +8,7 @@ import type {
 import type { UserContext } from "@/lib/user-context";
 import {
   API_BASE_URL,
-  authHeaders,
+  fetchWithAuthRetry,
   parseJsonResponse,
   throwResponseError,
 } from "@/lib/api-client";
@@ -66,9 +66,9 @@ export type SaveProjectRequest = {
 export async function saveProject(
   body: SaveProjectRequest,
 ): Promise<ProjectDetail> {
-  const response = await fetch(`${API_BASE_URL}/api/projects`, {
+  const response = await fetchWithAuthRetry(`${API_BASE_URL}/api/projects`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   return parseJsonResponse(response, "RepoFrame could not save this project.");
@@ -76,9 +76,7 @@ export async function saveProject(
 
 // List the signed-in user's saved projects, newest first (identity + timestamps).
 export async function listProjects(): Promise<ProjectSummary[]> {
-  const response = await fetch(`${API_BASE_URL}/api/projects`, {
-    headers: { ...(await authHeaders()) },
-  });
+  const response = await fetchWithAuthRetry(`${API_BASE_URL}/api/projects`);
   return parseJsonResponse(
     response,
     "RepoFrame could not load your saved projects.",
@@ -87,18 +85,17 @@ export async function listProjects(): Promise<ProjectSummary[]> {
 
 // Load one full saved snapshot to reopen it.
 export async function getProject(projectId: string): Promise<ProjectDetail> {
-  const response = await fetch(
+  const response = await fetchWithAuthRetry(
     `${API_BASE_URL}/api/projects/${encodeURIComponent(projectId)}`,
-    { headers: { ...(await authHeaders()) } },
   );
   return parseJsonResponse(response, "RepoFrame could not open that project.");
 }
 
 // Delete one saved project. Resolves on success (204); throws on 404/error.
 export async function deleteProject(projectId: string): Promise<void> {
-  const response = await fetch(
+  const response = await fetchWithAuthRetry(
     `${API_BASE_URL}/api/projects/${encodeURIComponent(projectId)}`,
-    { method: "DELETE", headers: { ...(await authHeaders()) } },
+    { method: "DELETE" },
   );
   if (!response.ok) {
     await throwResponseError(

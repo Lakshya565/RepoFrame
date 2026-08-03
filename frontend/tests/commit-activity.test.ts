@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { parseCommitActivityPayload } from "../src/lib/commit-activity.ts";
+import {
+  combineLegacyCommitActivity,
+  parseCommitActivityPayload,
+} from "../src/lib/commit-activity.ts";
 
 const timeline = {
   intervalLabel: "1 day",
@@ -25,7 +28,56 @@ test("accepts the bundled month and year response", () => {
     ...identity,
     ranges: { month: timeline, year: timeline },
   });
-  assert.equal(parsed.ranges.month.totalCommits, 2);
+  assert.equal(parsed.kind, "bundled");
+  if (parsed.kind === "bundled") {
+    assert.equal(parsed.data.ranges.month.totalCommits, 2);
+  }
+});
+
+test("normalizes two legacy single-range responses", () => {
+  const year = parseCommitActivityPayload({
+    ...identity,
+    range: "year",
+    contributorsTruncated: false,
+    ...timeline,
+  });
+  const month = parseCommitActivityPayload({
+    ...identity,
+    range: "month",
+    contributorsTruncated: false,
+    ...timeline,
+  });
+
+  assert.equal(year.kind, "legacy");
+  assert.equal(month.kind, "legacy");
+  if (year.kind === "legacy" && month.kind === "legacy") {
+    const combined = combineLegacyCommitActivity(year.data, month.data);
+    assert.deepEqual(combined.ranges.month.buckets, timeline.buckets);
+    assert.deepEqual(combined.ranges.year.buckets, timeline.buckets);
+  }
+});
+
+test("rejects legacy responses with mismatched repository identity", () => {
+  const year = parseCommitActivityPayload({
+    ...identity,
+    range: "year",
+    ...timeline,
+  });
+  const month = parseCommitActivityPayload({
+    ...identity,
+    repo: "different",
+    range: "month",
+    ...timeline,
+  });
+
+  assert.equal(year.kind, "legacy");
+  assert.equal(month.kind, "legacy");
+  if (year.kind === "legacy" && month.kind === "legacy") {
+    assert.throws(
+      () => combineLegacyCommitActivity(year.data, month.data),
+      /invalid commit activity response/i,
+    );
+  }
 });
 
 test("rejects a success payload with missing ranges", () => {
@@ -74,5 +126,8 @@ test("accepts a valid empty timeline", () => {
       year: timeline,
     },
   });
-  assert.equal(parsed.ranges.month.totalCommits, 0);
+  assert.equal(parsed.kind, "bundled");
+  if (parsed.kind === "bundled") {
+    assert.equal(parsed.data.ranges.month.totalCommits, 0);
+  }
 });

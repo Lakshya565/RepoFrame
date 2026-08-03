@@ -48,11 +48,21 @@ export function getSupabaseClient(): SupabaseClient | null {
 // The current access token (a Supabase-signed JWT), or null when not signed in /
 // not configured. This is what the backend verifies (auth.py). Read fresh each
 // call so an auto-refreshed token is always the one we send.
-export async function getAccessToken(): Promise<string | null> {
+export async function getAccessToken(
+  forceRefresh = false,
+): Promise<string | null> {
   const supabase = getSupabaseClient();
   if (!supabase) {
     return null;
   }
-  const { data } = await supabase.auth.getSession();
+  // A project that has just resumed can leave a browser holding an access token
+  // the backend no longer accepts. Authenticated API helpers may request one
+  // explicit refresh after a 401; ordinary calls keep using the cheap session read.
+  const { data, error } = forceRefresh
+    ? await supabase.auth.refreshSession()
+    : await supabase.auth.getSession();
+  if (error) {
+    return null;
+  }
   return data.session?.access_token ?? null;
 }

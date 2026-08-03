@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useRef } from "react";
 
 import { useAuth } from "@/lib/auth-context";
+import { ApiError } from "@/lib/api-client";
 import { useGeneration } from "@/lib/generation-context";
 import { snapshotSignature } from "@/lib/project-snapshot";
 import { saveProject, type SaveProjectRequest } from "@/lib/projects-api";
+import { isRetryablePersistenceStatus } from "@/lib/request-recovery";
 
 // Best-effort auto-save of the current analysis snapshot to the signed-in user's
 // account. Debounced so a burst of edits/generations coalesces into one write, and
@@ -14,14 +16,25 @@ import { saveProject, type SaveProjectRequest } from "@/lib/projects-api";
 // Analyzing a repo is enough to record it in History — generated content is NOT
 // required. The row is created on analysis and later upserts (same repo URL) once a
 // writeup is generated, so History becomes a true record of every repo looked at.
-// Failures are swallowed — persistence must never interrupt or surface over the
-// generation flow.
+// Transient failures retry in the background, but persistence never interrupts
+// or replaces the generation flow with an autosave error.
 
 // How long to wait after the last change before writing. One tunable place.
 const AUTOSAVE_DEBOUNCE_MS = 1500;
+const AUTOSAVE_RETRY_DELAYS_MS = [2000, 5000, 15000] as const;
+
+// Network failures and temporary backend/Supabase responses can recover without
+// user action. Validation/auth failures need a real state change, so repeatedly
+// posting the same payload would only create noise.
+function isRetryableSaveError(caught: unknown): boolean {
+  if (!(caught instanceof ApiError)) {
+    return true;
+  }
+  return isRetryablePersistenceStatus(caught.status);
+}
 
 export function useProjectAutoSave(): void {
-  const { status } = useAuth();
+  const { status, session } = useAuth();
   const {
     repoMetadata,
     context,
@@ -66,40 +79,59 @@ export function useProjectAutoSave(): void {
     if (timer.current) {
       clearTimeout(timer.current);
     }
-    timer.current = setTimeout(() => {
-      const body: SaveProjectRequest = {
-        owner: repoMetadata.owner,
-        repo: repoMetadata.repo,
-        normalizedUrl: repoMetadata.normalizedUrl,
-        defaultBranch: repoMetadata.defaultBranch,
-        // Private-repo detection arrives with the GitHub App (15.5); public today.
-        isPrivate: false,
-        metadata: repoMetadata,
-        userContext: context,
-        profile,
-        outputs,
-        interviewTopics,
-        allGuidance,
-        verifications,
-        verificationModel: null,
-      };
-      void saveProject(body)
-        .then(() => {
-          // Record what we just persisted so an unchanged workspace won't save again.
+    let cancelled = false;
+    const body: SaveProjectRequest = {
+      owner: repoMetadata.owner,
+      repo: repoMetadata.repo,
+      normalizedUrl: repoMetadata.normalizedUrl,
+      defaultBranch: repoMetadata.defaultBranch,
+      // Private-repo detection arrives with the GitHub App (15.5); public today.
+      isPrivate: false,
+      metadata: repoMetadata,
+      userContext: context,
+      profile,
+      outputs,
+      interviewTopics,
+      allGuidance,
+      verifications,
+      verificationModel: null,
+    };
+
+    const persist = async (attempt: number): Promise<void> => {
+      try {
+        await saveProject(body);
+        if (!cancelled) {
+          // Record what we persisted so an unchanged workspace stays inert.
           setPersistedSignature(signature);
-        })
-        .catch(() => {
-          // Best-effort: a failed background save is intentionally silent.
-        });
+        }
+      } catch (caught) {
+        const retryDelay = AUTOSAVE_RETRY_DELAYS_MS[attempt];
+        if (
+          cancelled ||
+          retryDelay === undefined ||
+          !isRetryableSaveError(caught)
+        ) {
+          return;
+        }
+        timer.current = setTimeout(() => {
+          void persist(attempt + 1);
+        }, retryDelay);
+      }
+    };
+
+    timer.current = setTimeout(() => {
+      void persist(0);
     }, AUTOSAVE_DEBOUNCE_MS);
 
     return () => {
+      cancelled = true;
       if (timer.current) {
         clearTimeout(timer.current);
       }
     };
   }, [
     status,
+    session?.access_token,
     repoMetadata,
     busyTask,
     signature,
