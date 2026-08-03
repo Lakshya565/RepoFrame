@@ -64,8 +64,8 @@ export async function demoGenerateInterview(): Promise<{
   return { topics: DEMO_INTERVIEW, usage: ZERO_USAGE };
 }
 
-// Replays the four investigation stages with the same search/read detail strings
-// as the live backend, so the checklist demonstrates the real workflow.
+// Replays the investigation stages with representative search/read details from
+// the live backend, so the checklist demonstrates how claims gather evidence.
 export async function demoVerifyClaims(
   onProgress: (event: VerifyProgressEvent) => void,
 ): Promise<{
@@ -81,7 +81,29 @@ export async function demoVerifyClaims(
 
   onProgress({
     stage: "checking",
-    detail: "Searching repository paths for: usage accounting",
+    detail: "Searching repository paths for: prompt budget and evidence limits",
+  });
+  await delay(DEMO_VERIFY_STEP_MS);
+  onProgress({
+    stage: "checking",
+    detail: "Reading backend/app/services/prompt_budget.py",
+  });
+  await delay(DEMO_VERIFY_STEP_MS);
+
+  onProgress({
+    stage: "checking",
+    detail: "Searching repository paths for: progressive analysis and request reuse",
+  });
+  await delay(DEMO_VERIFY_STEP_MS);
+  onProgress({
+    stage: "checking",
+    detail: "Reading backend/app/services/analysis_service.py",
+  });
+  await delay(DEMO_VERIFY_STEP_MS);
+
+  onProgress({
+    stage: "checking",
+    detail: "Searching repository paths for: usage accounting and quotas",
   });
   await delay(DEMO_VERIFY_STEP_MS);
   onProgress({
@@ -98,8 +120,12 @@ export async function demoVerifyClaims(
     usage: ZERO_USAGE,
     investigation: {
       modelCalls: 3,
-      toolCalls: 2,
-      additionalFilesInspected: ["backend/app/services/usage_store.py"],
+      toolCalls: 6,
+      additionalFilesInspected: [
+        "backend/app/services/prompt_budget.py",
+        "backend/app/services/analysis_service.py",
+        "backend/app/services/usage_store.py",
+      ],
     },
   };
 }
