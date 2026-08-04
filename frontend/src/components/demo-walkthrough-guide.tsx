@@ -35,7 +35,6 @@ const STEP_COPY = {
 } as const;
 
 const TARGET_LABELS = {
-  "commit-activity": "Show commit activity",
   "generate-tab": "Back to tabs",
   "context-actions": "Show continue buttons",
   "generation-actions": "Show generation options",
@@ -70,10 +69,8 @@ export function DemoWalkthroughGuide() {
   const historyComplete = state.step === 5 && state.historyOpened;
 
   function handleShowTarget() {
+    if (!target) return;
     showTarget(target);
-    if (state.step === 1 && !state.analysisTargetViewed) {
-      dispatch({ type: "analysis_target_viewed" });
-    }
   }
 
   return (
@@ -128,7 +125,7 @@ export function DemoWalkthroughGuide() {
             Finish walkthrough
           </Button>
         </div>
-      ) : (
+      ) : target ? (
         <Button
           className="mt-4 transition-[color,background-color,transform] duration-150 active:scale-[0.97]"
           onClick={handleShowTarget}
@@ -137,7 +134,7 @@ export function DemoWalkthroughGuide() {
         >
           {TARGET_LABELS[target]}
         </Button>
-      )}
+      ) : null}
     </Card>
   );
 }

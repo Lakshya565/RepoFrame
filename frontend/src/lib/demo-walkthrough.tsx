@@ -22,7 +22,6 @@ import {
 } from "@/lib/demo-walkthrough-state";
 
 export type DemoWalkthroughTarget =
-  | "commit-activity"
   | "generate-tab"
   | "context-actions"
   | "generation-actions"
@@ -31,7 +30,6 @@ export type DemoWalkthroughTarget =
   | "history-content";
 
 const TARGET_ROUTES: Record<DemoWalkthroughTarget, string> = {
-  "commit-activity": "/demo",
   "generate-tab": "/demo",
   "context-actions": "/demo/generate",
   "generation-actions": "/demo/generate",
@@ -39,6 +37,9 @@ const TARGET_ROUTES: Record<DemoWalkthroughTarget, string> = {
   "history-tab": "/demo/generate",
   "history-content": "/demo/history",
 };
+
+const ANALYSIS_MIN_SCROLL_PX = 120;
+const ANALYSIS_CHECKPOINT_VIEWPORT_RATIO = 0.85;
 
 type DemoWalkthroughContextValue = {
   state: DemoWalkthroughState;
@@ -74,9 +75,9 @@ function interactiveElement(element: Element): HTMLElement | null {
 
 export function currentDemoWalkthroughTarget(
   state: DemoWalkthroughState,
-): DemoWalkthroughTarget {
+): DemoWalkthroughTarget | null {
   if (state.step === 1) {
-    return state.analysisTargetViewed ? "generate-tab" : "commit-activity";
+    return state.analysisExplored ? "generate-tab" : null;
   }
   if (state.step === 2) return "context-actions";
   if (state.step === 3) return "generation-actions";
@@ -132,11 +133,48 @@ export function DemoWalkthroughProvider({ children }: { children: ReactNode }) {
     return () => window.cancelAnimationFrame(frame);
   }, [pathname, revealTarget]);
 
+  // Step 1 reveals its exit prompt only after the visitor has genuinely
+  // scrolled far enough to bring commit activity into view.
+  useEffect(() => {
+    if (
+      pathname !== "/demo" ||
+      state.step !== 1 ||
+      state.analysisExplored
+    ) {
+      return;
+    }
+
+    const checkpoint = document.querySelector(
+      '[data-demo-checkpoint="analysis-explored"]',
+    );
+    if (!checkpoint) return;
+
+    const checkCheckpoint = () => {
+      const hasScrolled = window.scrollY >= ANALYSIS_MIN_SCROLL_PX;
+      const checkpointIsVisible =
+        checkpoint.getBoundingClientRect().top <=
+        window.innerHeight * ANALYSIS_CHECKPOINT_VIEWPORT_RATIO;
+
+      if (hasScrolled && checkpointIsVisible) {
+        dispatch({ type: "analysis_checkpoint_reached" });
+      }
+    };
+
+    checkCheckpoint();
+    window.addEventListener("scroll", checkCheckpoint, { passive: true });
+    window.addEventListener("resize", checkCheckpoint);
+    return () => {
+      window.removeEventListener("scroll", checkCheckpoint);
+      window.removeEventListener("resize", checkCheckpoint);
+    };
+  }, [pathname, state.analysisExplored, state.step]);
+
   // The current target receives a quiet outline. DOM attributes avoid threading
   // walkthrough props through every shared live-app component.
   useEffect(() => {
     if (state.display !== "open") return;
     const target = currentDemoWalkthroughTarget(state);
+    if (!target) return;
     const elements = document.querySelectorAll(selectorFor(target));
     elements.forEach((element) => element.setAttribute("data-demo-active", "true"));
     return () => {

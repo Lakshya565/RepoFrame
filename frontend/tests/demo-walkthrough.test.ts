@@ -35,6 +35,15 @@ test("advances through the complete action-driven walkthrough", () => {
   assert.equal(state.display, "open");
 });
 
+test("records analysis exploration without advancing the walkthrough", () => {
+  const explored = reduceDemoWalkthrough(INITIAL_DEMO_WALKTHROUGH_STATE, {
+    type: "analysis_checkpoint_reached",
+  });
+
+  assert.equal(explored.step, 1);
+  assert.equal(explored.analysisExplored, true);
+});
+
 test("ignores out-of-order events instead of skipping steps", () => {
   const initial = INITIAL_DEMO_WALKTHROUGH_STATE;
   const state = apply(

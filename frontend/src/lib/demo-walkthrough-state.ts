@@ -13,12 +13,12 @@ export type DemoGenerationKind =
 export type DemoWalkthroughState = {
   step: DemoWalkthroughStep;
   display: DemoWalkthroughDisplay;
-  analysisTargetViewed: boolean;
+  analysisExplored: boolean;
   historyOpened: boolean;
 };
 
 export type DemoWalkthroughEvent =
-  | { type: "analysis_target_viewed" }
+  | { type: "analysis_checkpoint_reached" }
   | { type: "generate_tab_opened" }
   | { type: "context_continued"; source: "added" | "repo_only" }
   | {
@@ -36,7 +36,7 @@ export type DemoWalkthroughEvent =
 export const INITIAL_DEMO_WALKTHROUGH_STATE: DemoWalkthroughState = {
   step: 1,
   display: "open",
-  analysisTargetViewed: false,
+  analysisExplored: false,
   historyOpened: false,
 };
 
@@ -55,9 +55,9 @@ export function reduceDemoWalkthrough(
   event: DemoWalkthroughEvent,
 ): DemoWalkthroughState {
   switch (event.type) {
-    case "analysis_target_viewed":
-      return state.step === 1
-        ? { ...state, analysisTargetViewed: true }
+    case "analysis_checkpoint_reached":
+      return state.step === 1 && !state.analysisExplored
+        ? { ...state, analysisExplored: true }
         : state;
     case "generate_tab_opened":
       return state.step === 1 ? { ...state, step: 2 } : state;
